@@ -3,7 +3,7 @@ title: "terraform init は何をしているのか【AI の Terraform 暴走を�
 emoji: "🛑"
 type: "tech"
 topics: ["terraform", "iac", "ai", "devops"]
-published: false
+published: true
 ---
 
 AI エージェントに Terraform を触らせるようになって、レビューの中身が変わりました。書かれた HCL を読むより先に、**AI が打とうとしているコマンドと、その出力の読み方**を見る必要が出てきた。エラーを消すために lock file を削除する、plan を読まずに apply に進む、lock エラーに `force-unlock` で応える。どれも人間の初心者と同じ間違いですが、AI は速いので、気づいたときには終わっています。
