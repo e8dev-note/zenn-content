@@ -24,18 +24,9 @@ plan が比べているのは 3 つです。
 - **state**(`terraform.tfstate`)… Terraform が覚えている台帳
 - **現実** … クラウドの実体
 
-順番としては、まず現実を読みに行って state を最新にし(refresh)、その state と HCL の差分を出します。plan の冒頭に出るこの行が、現実を読んでいる証拠です。
+順番としては、まず現実を読みに行って state との食い違いを確かめ(refresh)、そのうえで state と HCL の差分を出します。refresh の結果は plan の中で使うだけで、state ファイルは書き換えません。
 
-```text
-$ terraform plan
-terraform_data.config: Refreshing state... [id=4443e7b5-57aa-b9f2-5739-2d30db4ce34c]
-random_pet.app: Refreshing state... [id=rich-minnow]
-random_string.token: Refreshing state... [id=cG!W$Xz7]
-```
-
-手作業でクラウド側が変えられていた場合(drift)も、ここで見つかります。
-
-出力は「これから何をするか」の一覧です。最後の `Plan:` 行に追加・変更・削除の数が出ます。
+出力は「これから何をするか」の一覧です。最後の `Plan:` 行に追加・変更・削除の数が出ます。初回の plan はこうなります。
 
 ```text
 Terraform used the selected providers to generate the following execution
@@ -71,6 +62,17 @@ and found no differences, so no changes are needed.
 ```
 
 plan 自体は何も作らず、何も消しません。読むだけのコマンドです。
+
+リソースができた後の plan では、冒頭にこの行が出ます。現実を読みに行っている証拠です。
+
+```text
+$ terraform plan
+terraform_data.config: Refreshing state... [id=4443e7b5-57aa-b9f2-5739-2d30db4ce34c]
+random_pet.app: Refreshing state... [id=rich-minnow]
+random_string.token: Refreshing state... [id=cG!W$Xz7]
+```
+
+手作業でクラウド側が変えられていた場合(drift)も、ここで見つかります。
 
 ### 記号は 4 つ
 

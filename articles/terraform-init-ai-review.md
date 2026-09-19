@@ -125,7 +125,7 @@ clone 直後や `.terraform/` を消した後に出ます。`.terraform/` が無
 
 ### サイン 4 について
 
-backend の設定を変えると、次の init で「backend が変わった」というエラーが出ます。選択肢は 2 つで、`-migrate-state` は今の state を新しい置き場所に移し、`-reconfigure` は移さず新しい置き場所で空から始めます。AI が `-reconfigure` を選んだら、既存の state がどこに行くかを聞いてください。空の state で plan すると、全リソースが「新規作成」になります。
+backend の設定を変えると、次の init で「backend が変わった」というエラーが出ます。選択肢は 2 つで、`-migrate-state` は今の state を新しい置き場所に移し、`-reconfigure` は移さず、新しい置き場所にある state(なければ空)で始めます。元の state は元の場所に残ったままです。AI が `-reconfigure` を選んだら、既存の state がどこに行くかを聞いてください。空の state で plan すると、全リソースが「新規作成」になります。
 
 ## まとめ
 
