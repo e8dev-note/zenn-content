@@ -137,7 +137,7 @@ backend の設定を変えると、次の init で「backend が変わった」�
 
 1. terraform init は何をしているのか(この記事)
 2. [terraform plan は何を比べているのか](https://zenn.dev/e8dev/articles/terraform-plan-ai-review)
-3. [plan の記号を読む: `-/+` は一度消える](https://zenn.dev/e8dev/articles/terraform-plan-symbols-ai-review)
+3. plan の記号を読む: `-/+` は一度消える
 4. terraform apply で何が起きるのか
 5. state とは何か: Terraform の「台帳」
 6. remote state と lock: 台帳を共有する
