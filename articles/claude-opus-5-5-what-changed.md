@@ -3,12 +3,12 @@ title: "Claude Opus 5.5 は何が変わったのか。単価は下がったが�
 emoji: "🛑"
 type: "tech"
 topics: ["claude", "anthropic", "llm", "ai"]
-published: false
+published: true
 ---
 
 2026-09-22 に Claude Opus 5.5 がリリースされました。この記事は、AI の動きをレビューする人向けの 1 分動画シリーズ「AI を止めるサイン」の Opus 5.5 回のテキスト版です。ニュースの要約ではなく、「モデルが新しくなったとき、何を見て乗り換えを判断するか」の観点で書いています。
 
-@[youtube](VIDEO_ID_OPUS55)
+@[youtube](ET3eCu3cAbw)
 
 数字はリリース翌日(09-23)に公式発表・移行ガイド・Artificial Analysis を読んで取ったものです。独立評価や開発者の反応は記事・ブログ経由のものが混ざるので、その都度出典を付けます。
 

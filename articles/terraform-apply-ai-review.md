@@ -3,14 +3,14 @@ title: "terraform apply で何が起きるのか【AI の Terraform 暴走を止
 emoji: "🛑"
 type: "tech"
 topics: ["terraform", "iac", "ai", "devops"]
-published: false
+published: true
 ---
 
 AI が書いた Terraform の実行を承認する立場の人に向けて、基本コマンドを 1 本ずつ「機構 / 設計意図 / AI を止めるサイン」の 3 問で解説するシリーズの 4 本目です。前回は [plan の記号を読む: -/+ は一度消える](https://zenn.dev/e8dev/articles/terraform-plan-symbols-ai-review)。
 
 今回は `terraform apply`。`yes` と打ったあと、何が起きているか説明できますか?
 
-@[youtube](VIDEO_ID_APPLY)
+@[youtube](vArRHNQ_aRI)
 
 ログはすべて `hashicorp/random` provider で取りました。クラウドの課金なしで手元で再現できます(Terraform 1.16.0)。
 
