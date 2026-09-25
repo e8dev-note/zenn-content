@@ -139,7 +139,7 @@ AI の要約で一番多い言い換えがこれです。`-/+` は `~` の一種
 1. [terraform init は何をしているのか](https://zenn.dev/e8dev/articles/terraform-init-ai-review)
 2. [terraform plan は何を比べているのか](https://zenn.dev/e8dev/articles/terraform-plan-ai-review)
 3. plan の記号を読む: `-/+` は一度消える(この記事)
-4. [terraform apply で何が起きるのか](https://zenn.dev/e8dev/articles/terraform-apply-ai-review)
+4. terraform apply で何が起きるのか
 5. state とは何か: Terraform の「台帳」
 6. remote state と lock: 台帳を共有する
 
