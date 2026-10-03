@@ -138,7 +138,7 @@ flowchart TB
   core__order_lines[("core__order_lines<br/>取り込み済みの表")]:::data
   stg_core__orders["stg_core__orders<br/>view<br/>旧ストアドの 1 段目"]:::proc
   stg_core__order_lines["stg_core__order_lines<br/>view<br/>旧ストアドの 2 段目"]:::proc
-  tests{{"data test 11 本<br/>旧 06:30 チェック SQL"}}:::proc
+  tests[["data test 11 本<br/>旧 06:30 チェック SQL"]]:::proc
   agg_daily_channel_kpi["agg_daily_channel_kpi<br/>table<br/>旧ストアドの 3 段目"]:::proc
   core__orders -->|"source()"| stg_core__orders
   core__order_lines -->|"source()"| stg_core__order_lines
@@ -227,23 +227,14 @@ flowchart TB
 
 :::details 製品の地図（名前の変遷）
 
-```mermaid
-flowchart TB
-  platform{{"dbt platform<br/>旧 dbt Cloud<br/>ホスト型のサービス"}}:::lic_platform
-  v1(["dbt v1（この記事）<br/>旧 dbt Core 1.x<br/>Apache 2.0"]):::lic_oss
-  subgraph v2["dbt v2（旧 Fusion）"]
-    direction TB
-    v2_full["dbt（フル版）<br/>プロプライエタリ"]:::lic_prop
-    v2_oss(["dbt OSS<br/>Apache 2.0"]):::lic_oss
-  end
-  platform -->|"ホストして動かす"| v1
-  platform -->|"ホストして動かす"| v2
-  classDef lic_oss fill:#F7F6F2,stroke:#5E7D6A,stroke-width:3px,color:#2B2F36
-  classDef lic_prop fill:#F7F6F2,stroke:#2F6F9F,stroke-width:3px,color:#2B2F36
-  classDef lic_platform fill:#F7F6F2,stroke:#C9852B,stroke-width:3px,color:#2B2F36
-  style v2 fill:none,stroke:#8A8F98
-```
-参考図: 製品とライセンス（2026-10-03 時点）。
+| 名前（2026-10-03 時点） | 以前の名前 | ライセンス・形態 | 補足 |
+|---|---|---|---|
+| dbt v1（この記事） | dbt Core 1.x | Apache 2.0 | |
+| dbt（v2 のフル版） | dbt Fusion | プロプライエタリ | v2 は旧 Fusion |
+| dbt OSS（v2） | dbt Fusion | Apache 2.0 | v2 は旧 Fusion |
+| dbt platform | dbt Cloud | ホスト型のサービス | v1 と v2 をホストして動かす |
+
+参考表: 製品とライセンス（2026-10-03 時点）。
 :::
 
 ### 確認問題 2
