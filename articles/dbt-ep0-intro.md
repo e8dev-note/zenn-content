@@ -10,9 +10,9 @@ published: true
 
 **この章の問い**: 自分向けか。何分かかり、何が分かるか。
 
-この記事は、データ基盤構築シリーズ dbt™ 編の 0話です。本編（1話〜）の前に置く序章で、dbt に移すと何が変わり、何が残るかの全体像を示します。本編は、1話がテストと鮮度の確認、2話が突合と CI、3話が品質の監視、4〜5話がセマンティックレイヤー、6話（予定）が起動と運用です。この記事の中の区切りは「章」と呼びます。
+この記事は、データ基盤構築シリーズ dbt™ 編の 0話です。本編（1話〜）の前に置く序章で、dbt に移すと何が変わり、何が残るかの全体像を示します。本編は、1話がテストと鮮度の確認、2話が突合と CI、3話が品質の監視、4〜5話がセマンティックレイヤー、6話（予定）が起動と運用です。シリーズの回は「話」、この記事の中の区切りは「章」と書き分けます。
 
-対象は、スケジュールクエリとストアドを担当し、dbt の導入の検討に出る方です。実行順やテストの変わり方は、外から見えにくい所です。読み終えると変化を説明でき、手元で確かめ、検討会で答えられます。差分更新（incremental）は後の回です。
+対象は、スケジュールクエリとストアドを担当し、dbt の導入の検討会に出る方です。実行順やテストの変わり方は、外から見えにくい所です。読み終えると、変化を説明でき、手元で確かめられ、検討会で答えられます。増分の更新（incremental）は後の回です。
 
 **先に結論（3 行）**
 
@@ -42,9 +42,9 @@ flowchart LR
   style change fill:none,stroke:#5E7D6A
   style keep fill:none,stroke:#8A8F98,stroke-dasharray:6 4
 ```
-図 0: 変わるもの（左）と残るもの（右）。「別の手順」は dbt の source freshness、「外の時計」は自前の場合です。クエリの課金は DWH 側のままです（2026-10-03 確認）。
+図 0: 変わるもの（左）と残るもの（右）。「別の手順」は dbt の source freshness のことです。「外の時計」が要るのは自前の dbt の場合です。クエリの課金は DWH 側のままです（2026-10-03 確認）。
 
-**読み方**: 概要は 0・1・2・6章、検討会の準備は＋3・5章、手を動かすなら＋4章です。見込みは読む 22 分、手を動かす 40 分です（初回の取得を除く）。読むだけなら記事で完結します。解説動画は 6章に置きます。
+**読み方**: 概要は 0・1・2・6章、検討会の準備は＋3・5章、手を動かすなら＋4章です。所要時間の見込みは、読むのに 22 分、手を動かすのに 40 分です（初回の取得を除く）。読むだけなら記事で完結します。解説動画は 6章に置きます。
 
 **前提の用語**
 
@@ -62,14 +62,14 @@ flowchart LR
 
 > この記事の舞台は、あるコーヒー・食品の大手通販（架空）です。設定、数字、障害は架空のもので、各製品で実際に起きた障害ではありません。実在の企業や、筆者の所属先・取引先とは関係なく、データはすべて合成です。各製品の仕様は 2026 年 10 月時点の公式情報によります。
 
-**持ち帰る 1 文**: 実行順とテストの止め方は変わり、取り込みを待たない点は変わりません。
+**持ち帰る 1 文**: 実行順と、テストが落ちたときの下流の扱いは変わり、build が取り込みを待たない点は変わりません。
 
 ## 1. dbt に移すと、何が実行順を決めるのか
 
 **この章の問い**: 表どうしの実行順は、何で決まるのか。
 
 :::message
-**あなたの現場では**: 起動時刻の前後に頼っていた順番は ref() に、チェック SQL は data test になります。
+**あなたの現場では**: 実行順の決め方は、起動時刻の前後関係から ref() に、チェック SQL は data test に置き換わります。
 :::
 
 ### model と ref()
@@ -152,20 +152,20 @@ flowchart TB
   classDef data fill:#F7F6F2,stroke:#2F6F9F,stroke-width:3px,color:#2B2F36
   classDef proc fill:#F7F6F2,stroke:#5E7D6A,stroke-width:3px,color:#2B2F36
 ```
-図 1: テストは model の後、下流の前に走り、落ちると（既定）下流は SKIP です。
+図 1: テストは model の後、下流の前に走り、落ちると（既定）下流は SKIP です。06:30 のチェック SQL と旧ストアドの 1〜3 段目は 3章で説明します。
 
 ### dbt が受け持つもの
 
 dbt が担うのは DWH の中の変換（ELT の T）で、抽出とロード（E と L）は他のツールが担います。
 
-変換だけのツールと思っていた筆者には、seed や source freshness（付録の用語マップ）が取り込みの周辺に手が届くのが意外でした。テストと、列の説明からのドキュメントの生成も、同じプロジェクトに置けます。
+dbt を変換だけのツールと思っていた筆者には、seed や source freshness（付録の用語マップ）で取り込みの周辺にも手が届くのが意外でした。テストも、列の説明から生成するドキュメントも、同じプロジェクトで扱えます。
 
 ### 確認問題 1
 
 自前の dbt の場合、次の 8 つを dbt が受け持つものと dbt の外に残るものに分けてください。
 
-- API からの取り込み、bq load での大量のロード、小さな対応表の CSV を DWH に載せる、取り込んだ表の鮮度の確認
-- SELECT の中での重複の除去、毎朝の起動、列の説明からドキュメントを生成する、集計のテスト
+- API からの取り込み、bq load での大量のロード、小さな対応表（CSV）の DWH への読み込み、取り込んだ表の鮮度の確認
+- SELECT の中での重複の除去、毎朝の起動、列の説明からのドキュメント生成、集計のテスト
 
 :::details 答え
 dbt の外に残るのは API からの取り込み、bq load、毎朝の起動です。残りの 5 つは順に seed、source freshness、model の SELECT、ドキュメントの生成、data test が受け持ちます。source freshness は build と別のコマンドです。
@@ -178,7 +178,7 @@ dbt の外に残るのは API からの取り込み、bq load、毎朝の起動�
 **この章の問い**: 何と比べ、何が違うのか。
 
 :::message
-**あなたの現場では**: 自前の dbt は、cron などの外の道具から dbt build を呼びます。何に呼ばせるか（起動役）も、導入で決めます（6話）。
+**あなたの現場では**: 自前の dbt では、cron などの外の道具から dbt build を呼びます。何に呼ばせるか（起動役）も、導入で決めます（6話）。
 :::
 
 ```mermaid
@@ -189,7 +189,7 @@ flowchart TB
   dbt["dbt ②<br/>model とテスト"]:::proc
   subgraph dwh["BigQuery（DWH）"]
     bq-raw[("取り込み層<br/>source")]:::data
-    bq-marts[("集計テーブル")]:::data
+    bq-marts[("KPI の表")]:::data
   end
   bi(["朝会の BI<br/>今のまま"]):::keep
   core-extract -->|"bq load<br/>到着は基幹しだい"| bq-raw
@@ -203,21 +203,21 @@ flowchart TB
   classDef note fill:none,stroke:none,color:#8A8F98
   style dwh fill:none,stroke:#2F6F9F
 ```
-図 2: 3章の架空の会社に dbt を入れた後の構成。①（起動役）は導入で決めます（スケジュールクエリで呼べるかは未確認）。
+図 2: 3章の架空の会社に dbt を入れた後の構成。①（起動役）は導入で決めます（スケジュールクエリで呼べるかは未確認）。②は dbt を開発・実行する場所です。①と②は、自前・dbt platform・Dataform で違います（下の表）。
 
-- **dbt v1**: 旧 dbt Core™ 1.x。自前で動かす Apache 2.0（2026-10-03 確認）の道具で、4章で使います。
+- **dbt v1**: 旧 dbt Core™ 1.x。自前で動かす道具で、ライセンスは Apache 2.0 です（2026-10-03 確認）。4章で使います。
 - **dbt platform**: 旧 dbt Cloud™。ホスト型のサービスです。
 - **Dataform**: 変換を SQLX で書く Google Cloud のサービスで、依存は `${ref()}` です。
 
 | 観点（2026-10-03 確認） | 自前の dbt v1 | dbt platform | Dataform |
 |---|---|---|---|
 | テストが落ちたとき | 下流を SKIP（既定） | 同左 | 既定では下流も実行（設定で止められる） |
-| 手元で動く範囲 | DuckDB で build とテスト | —（ホスト型。DuckDB は v2 の接続一覧になし） | コンパイルまで |
+| 手元で動く範囲 | DuckDB で build とテスト | —（ホスト型。DuckDB は v2 の接続一覧になし。v2 は 6章） | コンパイルまで |
 | 開発環境 | PC ごとに Python（uv で仮想環境を用意） | ブラウザの Studio IDE | この記事では扱わない |
 | いつ動かすか | 外の道具から呼ぶ | ジョブ（時刻は UTC） | ワークフロー設定など |
 | ライセンス料 | 0 円（人手と DWH の課金は別） | 下の料金表 | 無料（実行とログの課金は別） |
 | 席とアカウント | — | Starter は 5 席まで。Developer・Starter のアカウントは米国（東京は Enterprise 系） | — |
-| 向けられる DWH | アダプタで選ぶ | 接続一覧の DWH | BigQuery だけ |
+| 向けられる DWH | アダプタ（付録の用語マップ）で選ぶ | 接続一覧の DWH | BigQuery だけ |
 
 **dbt platform の料金（2026-10-03 確認）**
 
@@ -227,7 +227,7 @@ flowchart TB
 | Starter | 1 人あたり月 100 ドル | 5 | 15,000 |
 | Enterprise | 個別見積もり | — | 100,000 |
 
-テストは数えず、DWH の料金は別です。契約の時期で数が違うこともあります。
+この数にテストは含まれず、DWH の料金は別です。契約の時期で数が違うこともあります。
 
 ### 確認問題 2
 
@@ -238,11 +238,11 @@ flowchart TB
 
 :::details 答えの例（2026-10-03 確認）
 
-- X: platform です。ブラウザで開発でき、5 席以内で、起動もジョブに任せられます。Dataform も BigQuery だけで足りますが、開発環境は未確認です。
-- Y: 自前の dbt v1 です。ライセンス料は 0 円で、BigQuery 以外にも向けられます。platform は 5 席を超え、アカウントを東京に置くには Enterprise 系が要ります。
+- X: platform です。ブラウザで開発でき、5 席以内で、起動もジョブに任せられます。Dataform も、DWH が BigQuery だけなら足りますが、開発環境はこの記事では扱いません。
+- Y: 自前の dbt v1 です。ライセンス料は 0 円で、BigQuery 以外にも向けられます。platform では 8 人が Starter の 5 席を超え、アカウントを東京に置くには Enterprise 系が要ります。
 :::
 
-**持ち帰る 1 文**: 3 つの差は、テストの既定、手元で回せる範囲、開発環境、席とアカウント（2026-10-03 確認）にあります。
+**持ち帰る 1 文**: 3 つの選択肢の違いは、テストの既定、手元で回せる範囲、開発環境、席とアカウント（2026-10-03 確認）にあります。
 
 ## 3. セールの 2 つの朝 — dbt で変わらない朝と変わる朝
 
@@ -257,7 +257,7 @@ sequenceDiagram
   participant core-extract as 基幹の抽出
   participant scheduler as 外の時計
   participant dbt as dbt
-  participant bq-marts as 集計テーブル
+  participant bq-marts as KPI の表
   participant bi as 朝会
   Note over core-extract: 08-05（セール初日）の夜間バッチが延びる
   scheduler->>dbt: 06:00 dbt build
@@ -273,14 +273,14 @@ sequenceDiagram
 ```
 図 3: 架空の会社の 08-06 の朝。build は 06:40 の到着を待たず、この例のテストも通って終わります。
 
-**変わる朝（08-07）**: KPI のストアドは、受注の集計（スケジュールクエリ）の表を読みます。いつもは数分の集計がこの朝は 35 分かかり、KPI は前日の集計を読みました。集計も model にして ref() で読めば、KPI は集計の後に作られ、09:00 の朝会に間に合います。lab に受注の集計はなく、KPI が staging の後に作られる順を 4章で確かめます。
+**変わる朝（08-07）**: KPI のストアドは、受注の前処理（スケジュールクエリ）の表を読みます。いつもは数分で終わる前処理がこの朝は 35 分かかり、KPI は前日の前処理の結果を読みました。前処理も model にして ref() で読めば、KPI はその後に作られ、09:00 の朝会に間に合います。ハンズオンにはこのスケジュールクエリに当たる model がないため、4章では代わりに、KPI が staging の後に作られる順を確かめます。
 
 ### 確認問題 3
 
-08-06 の朝、(a) 06:00 起動のスケジュールクエリと (b) cron が 06:00 に呼ぶ dbt build では、何が起きるでしょうか。(b) で受注の集計も model にすると、08-07 の朝は (a) と (b) で何が違うでしょうか。
+08-06 の朝、(a) 06:00 起動の KPI のストアドと (b) cron が 06:00 に呼ぶ dbt build では、何が起きるでしょうか。(b) で受注の前処理も model にすると、08-07 の朝は (a) と (b) で何が違うでしょうか。
 
 :::details 答え
-08-06 はどちらも欠けた KPI を作ります。この例のテストは行の欠けを見ないので、(b) も通って終わります。08-07 は、(a) は前日の集計を読みえますが、(b) は集計の後に作ります。
+08-06 はどちらも欠けた KPI を作ります。この例のテストは行の欠けを見ないので、(b) も通って終わります。08-07 は、(a) では KPI が前日の前処理の結果を読むことがありますが、(b) では KPI が前処理の後に作られます。
 :::
 
 ### 3 つの model への分解
@@ -289,7 +289,7 @@ sequenceDiagram
 **あなたの現場では**: ストアドの INSERT-SELECT の各段は、SELECT の部分を取り出せば model になります。
 :::
 
-source は取り込み済みの表の宣言です。0話はそれを整える staging（view）2 つと、集計の marts（table）1 つに分けました。
+source は取り込み済みの表の宣言です。0話では旧ストアドを、source を整える staging（view）2 つと、集計の marts（table）1 つに分けました。
 
 | 旧ストアドの手順 | 0話の model | 変えたこと（旧 → 新） |
 |---|---|---|
@@ -299,7 +299,7 @@ source は取り込み済みの表の宣言です。0話はそれを整える st
 
 KPI の数字が変わるのは、dbt のせいではなく、移行で旧ストアドの定義を直したからです。旧と新は並走させて突き合わせます（2話）。
 
-**持ち帰る 1 文**: 集計が長引いた朝の読み違いは ref() で防げますが、抽出の遅れによる欠けは dbt でも残ります。
+**持ち帰る 1 文**: 前処理が長引いた朝の読み違いは ref() で防げますが、抽出の遅れによる欠けは dbt でも残ります。
 
 ## 4. ハンズオン — build で何が流れ、どこで止まるか
 
@@ -409,7 +409,7 @@ expected/xs__clean__2026-10-01.json: build {'success': 3, 'pass': 11}、pass 以
 OK: 正解ファイルと一致
 ```
 
-作り方（materialization）は dbt_project.yml で層ごとに決め、view も table も build のたびに作り直されます。
+作り方（materialization）は dbt_project.yml で層ごとに決めます。view も table も、build のたびに作り直されます。
 
 ```yaml:dbt_project.yml（23〜31 行目）
 models:
@@ -423,7 +423,7 @@ models:
       +materialized: table
 ```
 
-dbt show も、照合が読む run_results.json を上書きするので、照合は show の前に済ませます。
+作られた表の種類（view か table か）を dbt show で確かめます。このコマンドは、照合が読む run_results.json を上書きするので、照合はその前に済ませます。
 
 ```powershell
 uv run dbt show --output json --inline "select table_schema, table_name, table_type from information_schema.tables where table_schema in ('ec_staging', 'ec_marts') order by 1, 2"
@@ -456,9 +456,9 @@ uv run dbt show --output json --inline "select table_schema, table_name, table_t
 別のプロセスが DuckDB のファイルを読み書きで開いていると止まります（閉じれば通る）。
 
 ```text
-（前略: 状況の説明、版と実行の表示）
-15:54:38  [ERROR]: Encountered an error:
-IO Error: Cannot open file "C:\architect\labs\_dryrun-ep0\data\ec_analytics.duckdb": プロセスはファイルにアクセスできません。別のプロセスが使用中です。
+（前略: 版と実行の表示）
+06:58:57  [ERROR]: Encountered an error:
+IO Error: Cannot open file "C:\architect\labs\work\ec-analytics-handson\data\ec_analytics.duckdb": プロセスはファイルにアクセスできません。別のプロセスが使用中です。
 （後略: 開いているプロセスのパスと Traceback）
 ```
 :::
@@ -484,9 +484,9 @@ sequenceDiagram
   dbt->>duckdb: create table agg_daily_channel_kpi
   dbt-->>scheduler: PASS 14（model 3、テスト 11）
 ```
-図 4: threads 4 の lab では、依存のない 2 つが並んで走りました（簡略化した図です）。
+図 4: ハンズオン（threads 4）では、依存のない 2 つが並んで走りました（簡略化した図です）。
 
-SQL は target/ と logs/dbt.log に、状態と時刻は run_results.json に残ります。テストは対象の model の後に、KPI は 11 本のテストの後に始まっていました。lab の relationships のテストは、落ちても下流を止めない設定です（1話）。
+SQL は target/ と logs/dbt.log に、状態と時刻は run_results.json に残ります。テストは対象の model の後に、KPI は 11 本のテストの後に始まっていました。ハンズオンの relationships のテストは、落ちても下流を止めない設定です（1話）。
 
 dbt.log から並べた要約です（時刻は JST。名前などは途中まで）。
 
@@ -618,7 +618,7 @@ uv run dbt show --inline "select (select count(*) from {{ ref('stg_core__orders'
 
 ```diff
 diff --git a/models/staging/core/stg_core__orders.sql b/models/staging/core/stg_core__orders.sql
-index fd4f8c4..06f5a15 100644
+index fd4f8c4..a5afd24 100644
 --- a/models/staging/core/stg_core__orders.sql
 +++ b/models/staging/core/stg_core__orders.sql
 @@ -21,4 +21,9 @@ select
@@ -627,7 +627,7 @@ index fd4f8c4..06f5a15 100644
      _loaded_at
 -from {{ source('core', 'orders') }}
 +from (
-+    -- 壊す（SC-03）: 取り込みの二重実行を模して、同じ source をもう一度 union all で重ねる
++    -- 壊す: 取り込みの二重実行を模して、同じ source をもう一度 union all で重ねる
 +    select * from {{ source('core', 'orders') }}
 +    union all
 +    select * from {{ source('core', 'orders') }}
@@ -647,7 +647,7 @@ index fd4f8c4..06f5a15 100644
 15:51:12  Done. PASS=12 WARN=0 ERROR=1 SKIP=1 NO-OP=0 REUSED=0 TOTAL=14
 ```
 
-unique が FAIL、KPI が SKIP、ほかのテスト 10 本と view 2 つは PASS です。18580 は重複した order_no の数で、終了コードは 1 でした。
+unique が FAIL、KPI が SKIP、ほかのテスト 10 本と view 2 つは PASS です。18580 は重複した order_no の数です。終了コードは 1 でした。
 
 壊した後の値です。
 
@@ -660,6 +660,8 @@ unique が FAIL、KPI が SKIP、ほかのテスト 10 本と view 2 つは PASS
 
 テストが落ちた stg_core__orders は 2 倍の行で作り直され、KPI の表は前回の内容（行数も合計も同じ）のまま残りました。
 
+変更を戻して build し直すと、PASS 14 に戻ります。
+
 ```powershell
 git restore models/staging/core/stg_core__orders.sql
 uv run dbt build
@@ -668,7 +670,6 @@ uv run dbt build
 （前略: 実行の表示）
 15:51:35  Done. PASS=14 WARN=0 ERROR=0 SKIP=0 NO-OP=0 REUSED=0 TOTAL=14
 ```
-
 
 ### 4-4. 緑のまま欠ける KPI
 
@@ -718,7 +719,7 @@ uv run dbt show --inline "select kpi_date, sum(order_count) as order_count, sum(
 | 2026-08-05 |         171 |            1040053 |
 ```
 
-上は遅れあり、下は遅れなしです。緑なのに 08-05 の行がなく、08-04 も 134 件から 108 件に減りました（理由は未確認）。この例のテスト 11 本は行の欠けを見ないので、緑のまま終わります。
+上は遅れあり、下は遅れなしです。緑なのに 08-05 の行がなく、08-04 も 134 件から 108 件に減りました（理由は本記事では扱いません）。この例のテスト 11 本は行の欠けを見ないので、緑のまま終わります。
 
 :::details 元に戻す手順
 生成からやり直し、正解ファイルと照合します。
@@ -736,23 +737,23 @@ OK: 正解ファイルと一致
 ```
 :::
 
-**持ち帰る 1 文**: DuckDB の build は model とテストより多い SQL を依存の順に流し、テストが落ちれば（既定）下流を止めます。
+**持ち帰る 1 文**: DuckDB の build は、model とテストを合わせた数より多い SQL を依存の順に流し、テストが落ちれば（既定）下流を止めます。
 
 ## 5. 検討会で聞かれること
 
 **この章の問い**: 検討会で何を聞かれ、どう答えるか。
 
 **問い 1（朝会の参加者、上司）: セール初日の翌朝は防げたのか**
-いいえ。build は取り込みの完了を確かめません。遅れに気づくのは、build の前に別に呼ぶ source freshness で、取り込み時刻が古いと警告かエラーにします（1話）。鮮度のエラーで build を呼ばなくても、朝会には前回の KPI が出ます。防ぐには、取り込みの完了を合図に build を起動する方法があります（6話）。
+いいえ。build は取り込みの完了を確かめません。遅れに気づくのは、build の前に別に呼ぶ source freshness で、取り込み時刻が古いと警告かエラーにします（1話）。鮮度のエラーを見て build を呼ばずにおいても、朝会に出るのは前回の KPI のままです。防ぐには、取り込みの完了を合図に build を起動する方法があります（6話）。
 
 **問い 2（上司、経理）: 費用はどうなるのか**
-ライセンス料は自前なら 0 円、platform は Starter なら 1 人あたりの料金です（2章。2026-10-03 確認）。別に DWH の費用がかかり、model とテストのたびにクエリが流れます（4章）。チェック SQL はテストに置き換わり、自前なら dbt を動かす環境も要ります。
+ライセンス料は、自前なら 0 円、platform の Starter なら 1 人ごとにかかります（2章。2026-10-03 確認）。別に DWH の費用がかかり、model とテストのたびにクエリが流れます（4章）。チェック SQL はテストに置き換わり、自前なら dbt を動かす環境も要ります。
 
 **問い 3（上司）: スケジュールクエリとストアドを全部作り直すのか**
-取り込みは残ります。自前の dbt なら、build を動かす環境と起動役が今あるかを確かめ、なければ用意します（6話）。移すのは変換で、SELECT はほぼそのまま model に、増分の MERGE は incremental になります。変数や分岐、日付の引数を使う手続きは、別に洗い出します。筆者は導入後、洗い替えか incremental かの検討が足りず、データの欠損や重複を経験しました。
+移すのは変換で、取り込みは残ります。SELECT はほぼそのまま model に、増分の MERGE は incremental になります。筆者の経験では、洗い替えか incremental かの検討が足りず、データの欠損や重複が起きました。変数や分岐、日付の引数を使う手続きは、別に洗い出します。自前の dbt なら、build を動かす環境と起動役が今あるかを確かめ、なければ用意します（6話）。
 
 **問い 4（上司）: dbt を入れれば品質は保証されるのか**
-いいえ。筆者も導入後に、テスト不足でデータが一時的に不整合になりました。build が止めるのは下流までで、何を検査するかは人が決めます（1話）。
+いいえ。導入後にテストが足りず、データが一時的に不整合になったことが筆者にもあります。build がするのは、テストが落ちたときに下流を止めるところまでです。何を検査するかは人が決めます（1話）。
 
 **問い 5（朝会の参加者）: テストが落ちた朝、朝会には何が出るのか**
 上流のテストなら（既定）、KPI の表は前回の build のまま残り、KPI 自身のテストなら作り直し済みです（4-3）。build は終了コード 1 で終わるので、起動する側でそれを見て知らせます。
@@ -765,12 +766,12 @@ OK: 正解ファイルと一致
 - Managed Service for Apache Airflow（旧 Cloud Composer）
 - Cloud Scheduler と Cloud Run jobs（構成の例。dbt と組む公式の案内は未確認）
 
-比べる観点（取り込みとのつなぎ方、再実行、費用、手間）は、筆者も比較しきれていません（6話）。
+取り込みとのつなぎ方、再実行、費用、手間の観点での比較は、筆者もまだしきれていません（6話）。
 
 **問い 7（情報システム部）: PC とネットワークの申請に何が要るのか**
 Python 本体と uv、git、パッケージの取得先と GitHub Releases への接続、プロキシと社内 CA の設定です（4章のつまずき）。ホスト名の一覧と、dbt に渡す BigQuery の権限は、本記事では扱いません。
 
-**持ち帰る 1 文**: 翌朝の欠けには build と別の source freshness で気づけ、取り込みを合図にした起動で防ぐ方法があります。
+**持ち帰る 1 文**: 翌朝の欠けには build とは別に呼ぶ source freshness で気づくことができ、防ぐには取り込みを合図に build を起動する方法があります。
 
 ## 6. まとめと次の一歩
 
@@ -783,10 +784,10 @@ Python 本体と uv、git、パッケージの取得先と GitHub Releases へ�
 **(a) 自社で確かめること**
 
 1. 06:00 前後に起動し、ほかのクエリの結果を読むクエリの組
-2. 今のスケジュールクエリとストアドの月の費用と、最低課金の規則（2026-10-03 確認、4章）
+2. 今のスケジュールクエリとストアドの月の費用と、最低課金の規則（2026-10-03 時点。4章）
 3. 社用 PC で uv sync が通るか（パッケージの取得先と github.com、社内 CA）
 4. 取り込みがいちばん遅く届いた日
-5. platform を使うなら、人数とアカウントの置き場所（2026-10-03 確認）
+5. platform を使うなら、人数とアカウントの置き場所（platform の条件は 2026-10-03 時点）
 6. 自前なら、build を動かす環境と起動役があるか
 
 **(b) 聞く質問と相手**
@@ -816,7 +817,7 @@ https://www.youtube.com/watch?v=ELwH-VA3J2U
 | dbt OSS（v2） | dbt Core v2.0 | Apache 2.0 |
 | dbt platform | dbt Cloud | ホスト型のサービス |
 
-v2 の GA は 2026-09-16 に告知されました。pip install dbt で入るのはフル版で、v1 は当面 pip install dbt-core で入ります（2026-10-03 確認）。v2 への移行は 6話（予定）で、フル版の利用条件は未確認です。
+v2 の GA は 2026-09-16 に告知されました。pip install dbt で入るのはフル版で、v1 は当面 pip install dbt-core で入ります（2026-10-03 確認）。v2 への移行は 6話（予定）で扱います。フル版の利用条件は未確認です。
 :::
 
 **持ち帰る 1 文**: 06:00 前後で依存し合う処理を 1 組選び、ref() で書けるかを確かめます。
@@ -832,6 +833,7 @@ v2 の GA は 2026-09-16 に告知されました。pip install dbt で入るの
 | Jinja | SQL に組み合わせるテンプレート言語 |
 | uv | Python とパッケージをそろえるツール |
 | incremental | 増分の MERGE を置き換える作り方 |
+| アダプタ | dbt が DWH と通信するための部品 |
 
 ### 参考文献（確認日 2026-10-03）
 
@@ -849,7 +851,8 @@ v2 の GA は 2026-09-16 に告知されました。pip install dbt で入るの
 
 ### 更新履歴
 
-- 2026-10-04: 下書き（未公開）
+- 2026-10-04: 公開
+- 2026-10-04: 文章と図の表記を見直し
 
 ### 生成 AI の利用と商標
 
