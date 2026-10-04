@@ -25,15 +25,15 @@ flowchart LR
   subgraph change["変わる（dbt に移すと）"]
     direction TB
     run_order["実行順は ref() で決まる<br/>依存は SQL の 1 か所"]:::proc
-    test_stops["テストが落ちたら<br/>下流を作らない<br/>落ちた表は作り直し済み"]:::proc
+    test_stops["テストが落ちたら<br/>下流を作らない（既定）<br/>落ちた表は作り直し済み"]:::proc
     local_check["手元の DuckDB で<br/>build とテストを回せる"]:::proc
     run_order ~~~ test_stops ~~~ local_check
   end
-  subgraph keep["変わらない（外に残る）"]
+  subgraph keep["変わらない（build の外・DWH 側）"]
     direction TB
-    ingest_wait(["取り込みの遅れは<br/>待たない<br/>鮮度の確認は別の手順"]):::keep
-    schedule_out(["いつ動かすかは<br/>外の時計が決める"]):::keep
-    dwh_run(["SQL は DWH で流れる<br/>課金も DWH 側のまま"]):::keep
+    ingest_wait(["build は取り込みを<br/>待たない。鮮度の確認は<br/>dbt の別の手順"]):::keep
+    schedule_out(["いつ動かすかは<br/>外の時計が決める<br/>（自前の dbt）"]):::keep
+    dwh_run(["SQL は DWH で流れる<br/>クエリの課金も DWH 側"]):::keep
     ingest_wait ~~~ schedule_out ~~~ dwh_run
   end
   change ~~~ keep
@@ -183,14 +183,15 @@ dbt の外に残るのは API からの取り込み、bq load、毎朝の起動�
 
 ```mermaid
 flowchart TB
+  fictional["架空の会社の例"]:::note
   core-extract(["基幹の抽出<br/>今のまま"]):::keep
-  scheduler(["外の時計 ①<br/>cron など・今のまま"]):::keep
+  scheduler(["外の時計 ①<br/>cron など<br/>導入で決める"]):::keep
   dbt["dbt ②<br/>model とテスト"]:::proc
   subgraph dwh["BigQuery（DWH）"]
     bq-raw[("取り込み層<br/>source")]:::data
     bq-marts[("集計テーブル")]:::data
   end
-  bi(["朝会<br/>Data Studio・今のまま"]):::keep
+  bi(["朝会の BI<br/>今のまま"]):::keep
   core-extract -->|"bq load<br/>到着は基幹しだい"| bq-raw
   scheduler -->|"dbt build を呼ぶ"| dbt
   dbt -->|"SQL を流す"| dwh
@@ -199,9 +200,10 @@ flowchart TB
   classDef data fill:#F7F6F2,stroke:#2F6F9F,stroke-width:3px,color:#2B2F36
   classDef proc fill:#F7F6F2,stroke:#5E7D6A,stroke-width:3px,color:#2B2F36
   classDef keep fill:#F7F6F2,stroke:#8A8F98,stroke-width:2px,stroke-dasharray:6 4,color:#2B2F36
+  classDef note fill:none,stroke:none,color:#8A8F98
   style dwh fill:none,stroke:#2F6F9F
 ```
-図 2: 3章の架空の会社に dbt を入れた後の構成。①の「今のまま」は、今の起動役が build を呼べる場合です（スケジュールクエリでは未確認）。
+図 2: 3章の架空の会社に dbt を入れた後の構成。①（起動役）は導入で決めます（スケジュールクエリで呼べるかは未確認）。
 
 - **dbt v1**: 旧 dbt Core™ 1.x。自前で動かす Apache 2.0（2026-10-03 確認）の道具で、4章で使います。
 - **dbt platform**: 旧 dbt Cloud™。ホスト型のサービスです。
@@ -666,6 +668,7 @@ uv run dbt build
 （前略: 実行の表示）
 15:51:35  Done. PASS=14 WARN=0 ERROR=0 SKIP=0 NO-OP=0 REUSED=0 TOTAL=14
 ```
+
 
 ### 4-4. 緑のまま欠ける KPI
 
