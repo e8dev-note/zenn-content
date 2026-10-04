@@ -10,9 +10,24 @@ published: false
 
 **この章の問い**: この記事は誰向けで、読むと何が分かり、どのくらい時間がかかるか。
 
-この記事は、データ基盤構築シリーズ dbt™ 編の 1話です。本編の 1 本目で、壊れたデータと遅れたデータを下流に流さない仕組み（data test、severity、source freshness）を扱います。0話（序章）では、dbt に移すと何が変わるかの全体像とハンズオンの環境を示しました。本編は、1話がテストと鮮度の確認、2話が突合と CI、3話が品質の監視、4〜5話がセマンティックレイヤー、6話（予定）が起動と運用です。この記事の中の区切りは「章」と呼びます。
+この記事は、データ基盤構築シリーズ dbt™ 編の 1話です。本編の 1 本目で、壊れたデータと遅れたデータを止めるか知らせる仕組み（data test、severity、source freshness）を扱います。0話（序章）では、dbt に移すと何が変わるかの全体像とハンズオンの環境を示しました。本編は、1話がテストと鮮度の確認、2話が突合と CI、3話が品質の監視、4〜5話がセマンティックレイヤー、6話（予定）が起動と運用です。この記事の中の区切りは「章」と呼びます。
 
-**0話を読んでいない方へ**: 0話では、架空の会社で、テストが全部通ったのに、取り込みの遅れで前日の行が欠けた KPI ができる朝を見ました。build は鮮度を確かめないからです。準備は [0話](https://zenn.dev/e8dev/articles/dbt-ep0-intro) の 4章か README にあります。
+**この記事の舞台**
+
+![架空の通販会社の毎朝の流れ。前日に受注が入り、夜間にデータが BigQuery に届き、06:00 に日次 KPI を作り、06:30 に数字を確かめ、09:00 の朝会で KPI を見る。届く・作る・確かめるはデータ基盤グループ（あなた）、売る・見るは事業部。作る・確かめるの 2 つは「dbt に移す」の枠の中](/images/dbt-ep1-data-tests/company-overview.png)
+舞台の図: 0話と同じ架空の会社の毎朝です。
+
+この会社は、自家焙煎の豆や食品を、自社 EC（定期便を含む）・大手 EC モール 3 店・電話注文で売り、カフェなどへの卸もしています。あなたは、この会社のデータ基盤グループで、BigQuery にデータを集め、KPI を作る処理を保守している想定です。
+
+毎日、前日の受注のデータが、夜間に基幹システムから BigQuery に届きます。CRM の HubSpot と、Google 広告・Meta 広告のデータも、夜間から早朝に届きます。06:00 から日次 KPI（チャネル別の受注件数や金額）を作り、06:30 にチェック SQL で数字を確かめます。09:00 の朝会で事業部が KPI を見るまでに、正しい KPI をそろえるのがあなたの仕事です。
+
+日次 KPI を作るのは、スケジュールクエリとストアドです。スケジュールクエリは、決めた時刻に SQL を繰り返し流す BigQuery の機能です。この会社のストアド（ストアドプロシージャ）は、複数の SQL 文を束ねて名前を付け、BigQuery に保存したもので、呼び出すと中の文が上から順に流れます。今の作りでは、日次 KPI もチェック SQL も決めた時刻に動き、データの到着は待ちません。
+
+1話で扱うのは、図の「データが届く」が遅れた朝です。KPI を作る処理は、0話のハンズオンと同じく dbt build（下の前提の用語）に移したものとします。「数字を確かめる」の一部は、dbt のテストと鮮度の確認に移します。
+
+> 本シリーズでは、あるコーヒー・食品の大手通販（架空）を例に考えます。会社の設定と数字は説明のための架空のもので、実在の企業や、筆者の所属先・取引先とは関係ありません。文中の障害や設定ミスは架空の出来事で、各製品で実際に起きた障害を示すものではありません。EC プラットフォーム・広告媒体・CRM の製品名は実在のものですが、データはすべて合成したもので、実在のアカウントや顧客のデータは使っていません。各製品の仕様は 2026 年 10 月時点の公式情報にもとづきます。
+
+**0話を読んでいない方へ**: 0話では、テストが全部通ったのに、取り込みの遅れで前日の行が欠けた KPI ができる朝を見ました。dbt build は鮮度を確かめないからです。ハンズオンの環境の準備は、[0話](https://zenn.dev/e8dev/articles/dbt-ep0-intro) の 4章か、この記事の 4章で案内するリポジトリの README にあります。
 
 対象は、BigQuery のスケジュールクエリとストアドで毎朝の集計を回し、dbt を検討している方です。
 
@@ -20,28 +35,18 @@ published: false
 
 | 用語 | 意味 |
 |---|---|
-| source | 取り込み済みの表を、取り込み元ごとにまとめて dbt に宣言したもの |
+| source | 取り込み済みの表をまとめて、YAML で dbt に宣言したもの。この記事では、取り込み元（本文の「ソース」）ごとに 1 つ置きます |
+| model | 主に SELECT 文を 1 つ書いた .sql ファイルで、dbt が表やビューにする |
 | dbt build | model の作成とテストを依存の順に行う |
-| data test（データテスト） | 表にある行の中身についての主張を確かめる |
-| source freshness（ソース フレッシュネス） | 取り込み時刻で source の鮮度を確かめる |
+| data test（データテスト） | 表の行が満たすべき条件（例: 受注番号が重複しない、空でない）を確かめる |
+| source freshness（ソース フレッシュネス） | 取り込み時刻で source の鮮度を確かめる（以下 freshness） |
 | severity（セベリティ） | テストが落ちたとき、下流を止める（既定）か知らせるだけか |
 
 **先に結論（3 つ）**
 
 1. 使いどころ: 遅れたら KPI の作成を止めたいソースは build の前、知らせるだけのソースは build の後か別のジョブで、鮮度を確かめます。
-2. メリット: 許す古さをソースごとに source の隣へ宣言でき、build の前に呼べば終了コードで判定を返すので、欠けた KPI を作る前に気づけます。
-3. 限界: 止めるのは呼ぶ側で、届いても数字が確定したとは限りません。
-
-**読み方**
-
-- 1〜6章は「この章の問い」で始まり、「この章の要点」で終わります。
-- 「あなたの現場では」の枠は、今のやり方との対応です。
-- 概要は 0・1・2・6章、運用の設計には 3・5章も、手を動かすなら 4章も読みます。
-- 見込みは、読むのに約 25 分、手を動かすのに 45 分です。解説動画は 6章に置きます（準備中）。
-
-**動作確認環境（2026-10-04）**: Windows 11（PowerShell 5.1、Git Bash）、Python 3.12、uv 0.12.18。dbt-core 1.12.5、dbt-duckdb 1.11.0、dbt_utils 1.4.1。DWH の代わりに DuckDB 1.5.6 を使います。
-
-> 本シリーズでは、あるコーヒー・食品の大手通販（架空）を例に考えます。会社の設定と数字は説明のための架空のもので、実在の企業や、筆者の所属先・取引先とは関係ありません。文中の障害や設定ミスは架空の出来事で、各製品で実際に起きた障害を示すものではありません。EC プラットフォーム・広告媒体・CRM の製品名は実在のものですが、データはすべて合成したもので、実在のアカウントや顧客のデータは使っていません。各製品の仕様は 2026 年 10 月時点の公式情報にもとづきます。
+2. メリット: freshness は、許す古さ（しきい値）を、source を定義する YAML にソースごとに書けます。build の前に呼べば、error のしきい値を超えたときに終了コード 1 を返すので、欠けた KPI を作る前に気づけます。
+3. 限界: freshness 自身は build を止めず、止めるのは終了コードを見る呼び出し側で、この記事ではラッパー（下の図 0）です。また、freshness が PASS でも、届いた数字が確定したとは限りません（5章の問い 7）。
 
 ```mermaid
 flowchart TB
@@ -49,18 +54,18 @@ flowchart TB
   other-ingest(["HubSpot・広告の<br/>取り込み"]):::keep
   core-ingest(["基幹の取り込み"]):::keep
   raw[("取り込み層<br/>source")]:::data
-  gate["build の前の確認<br/>基幹の鮮度<br/>止める"]:::proc
-  build["dbt build<br/>seed・model・テスト"]:::proc
+  gate["build の前の確認<br/>基幹の鮮度<br/>古すぎたら終了コード 1"]:::proc
+  wrapper["ラッパー<br/>起動役が build の<br/>代わりに呼ぶ"]:::proc
+  build["dbt build<br/>model の作成とテスト"]:::proc
   kpi[("KPI の表")]:::data
   watch["build の後の確認<br/>HubSpot・広告の鮮度<br/>知らせる（止めない）"]:::notify
-  starter["起動役は build の<br/>代わりにラッパーを呼ぶ<br/>（確認 → build）"]:::note
   other-ingest --> raw
   core-ingest --> raw
   raw -->|"最後に届いた時刻"| gate
-  gate -->|"終了コード 0 の<br/>ときだけ呼ぶ"| build
+  gate -->|"終了コードを返す"| wrapper
+  wrapper -->|"終了コード 0 の<br/>ときだけ呼ぶ"| build
   build --> kpi
   raw -.->|"最後に届いた時刻"| watch
-  starter ~~~ gate
   build ~~~ watch
   classDef data fill:#F7F6F2,stroke:#2F6F9F,stroke-width:3px,color:#2B2F36
   classDef proc fill:#F7F6F2,stroke:#5E7D6A,stroke-width:3px,color:#2B2F36
@@ -68,7 +73,20 @@ flowchart TB
   classDef keep fill:#F7F6F2,stroke:#8A8F98,stroke-width:2px,stroke-dasharray:6 4,color:#2B2F36
   classDef note fill:none,stroke:none,color:#8A8F98
 ```
-図 0: 基幹は build の前に確かめ、ラッパーが終了コード 0 のときだけ build を呼びます。ラッパーは freshness と build を順に呼ぶスクリプトで、起動役（dbt build を呼ぶもの）が呼びます。
+図 0: ラッパーは freshness と build を順に呼ぶスクリプトで、終了コード 0 のときだけ build を呼びます。起動役（cron や Apache Airflow など、dbt build を呼ぶもの。2章）がラッパーを呼びます。
+
+**読み方**
+
+- 1〜6章は「この章の問い」で始まり、「この章の要点」で終わります。
+- 「あなたの現場では」の枠は、今のやり方との対応です。
+- 概要だけなら、0・1・2・6章を読みます。
+- 運用を設計するなら、加えて 3・5章を読みます。
+- 手を動かすなら、さらに 4章を読みます。
+- 見込みは、読むのに約 29 分、手を動かすのに 45 分です。解説動画は 6章に置きます（準備中）。
+
+**動作確認環境（2026-10-04〜05）**: Windows 11（PowerShell 5.1、Git Bash）、Python 3.12、uv 0.12.18。dbt-core 1.12.5、dbt-duckdb 1.11.0、dbt のパッケージ dbt_utils 1.4.1。DB は BigQuery の代わりに、PC の中で動く DuckDB 1.5.6 です。
+
+**筆者について**: BigQuery を中心に、dbt を 2 年使ってきました。
 
 ## 1. freshness のメリットは何か — 今のチェックと何が違うのか
 
@@ -80,11 +98,9 @@ flowchart TB
 
 筆者も、freshness の使いどころとメリットが分かっていませんでした。
 
-メリットを先に言うと、build の前に呼べば、欠けた KPI を作る前に遅れに気づけます。
+この会社（架空）の 08-06 は、06:00 に KPI を作った後、06:40 に基幹の抽出が届きました。06:30 のチェック SQL は遅れに気づきましたが、KPI の後で、毎朝届く約 40 通のチェックのメールに埋もれた 1 通でした。0話のハンズオンでこの朝を再現すると、build はテストが全部通ったまま、08-05 の行がない KPI を作りました（08-04 の件数も減りました）。
 
-この会社（架空）の 08-06 は、06:00 に KPI を作った後、06:40 に基幹の抽出が届きました。06:30 のチェック SQL は遅れに気づきましたが、KPI の後で、約 40 通のメールの 1 通でした。0話のハンズオンでこの朝を再現すると、build はテストが全部通ったまま、08-05 の行がない KPI を作りました（08-04 も一部欠けました）。
-
-data test は、届いて表にある行の中身についての主張です。届いていない行の欠けや古さは、そう書いたテストがなければ見ません。source freshness は、取り込み時刻の列の最大値と問い合わせた時刻の差を、warn と error のしきい値と比べます。
+data test は、届いて表にある行が条件を満たすかを確かめます。行の欠けやデータの古さは、それを確かめるテスト（下の補足の recency など）を書かなければ見ません。source freshness は、取り込み時刻の列の最大値と確かめた時刻（今）の差を、warn と error のしきい値と比べます。
 
 ```mermaid
 flowchart TB
@@ -96,7 +112,7 @@ flowchart TB
   kpi[("KPI の表<br/>08-05 の行がない")]:::data
   check(["今のチェック SQL<br/>06:30 KPI の後<br/>メールで知らせる"]):::keep
   threshold["この朝は呼んでいない<br/>error 12 時間は架空の設定"]:::note
-  raw -->|"最後に届いた時刻<br/>08-05 02:32"| fresh
+  raw -->|"最後に届いた時刻<br/>08-05 02:32<br/>（08-04 の受注の分）"| fresh
   raw -->|"届いた 2 件"| build
   build --> tests
   tests -->|"通ったので作る"| kpi
@@ -111,49 +127,53 @@ flowchart TB
 ```
 図 1: 08-04〜08-05 の説明用の受注 9 件のうち、06:00 に届いたのは 2 件で、この例のテストは全部 PASS します。freshness を build の前に呼んでいたら ERROR でした。
 
-| | 今のチェック SQL | KPI の前に移したチェック | freshness（build の前） |
+| | 今のチェック SQL | KPI の前に移したチェック（仮の案） | freshness（build の前） |
 |---|---|---|---|
 | 判定する時刻 | KPI の後（06:30） | KPI の前 | KPI の前 |
-| 止められるか | 止められない | 止められる（作りは現場ごと） | 終了コードで。止めるのは呼ぶ側 |
-| しきい値の場所 | SQL の中 | SQL の中 | source の定義の隣に、ソースごと |
-| 結果 | メール | 現場ごと | 状態、終了コード、結果のファイル |
+| 止められるか | 止められない | 止められる（作りは現場ごと） | 終了コードを返す。止めるのはそれを見るラッパー |
+| しきい値の場所 | SQL の中 | SQL の中 | source を定義する YAML に、ソースごと |
+| 結果 | メール | 現場ごと | 状態（PASS・WARN・ERROR）、終了コード、結果のファイル |
 
-表の「判定する時刻」の違いは、置き場所から来ます。ただ、止めること自体は、チェックを KPI の前に移しても作れます。それと比べた dbt の得は、しきい値が source の隣にそろい、表ごとに上書きできることです。`--select` で止めるソースと知らせるソースを分けて呼べ、結果は全ソースで同じ形で返ります。
+表の「判定する時刻」の違いは、freshness を呼ぶ位置（build の前）から来ます。ただ、止めること自体は、チェックを KPI の前に移しても作れます。それと比べた dbt の得は、しきい値が source を定義する YAML にそろい、表ごとに上書きできることです。対象のソースを選ぶオプション `--select` で、止めるソースと知らせるソースを分けて呼べ、結果は全ソースで同じ形で返ります。
 
 :::details 補足: 古さを見るテスト（recency）との違い
-dbt_utils の recency は、時刻の列の最大値が決めた期間より古いと失敗する data test です。source に付ければ、build の中でその source を読む model の前に判定され、error ならその下流だけが止まります（試していません）。その止め方でよければ recency が合います。build の前に丸ごと止める、build の後に知らせる、warn と error の 2 段で分けるなら freshness です（筆者の判断）。
+dbt_utils の recency は、時刻の列の最大値が決めた期間より古いと失敗する data test です。source に付ければ、build の中でその source を読む model の前に判定され、error ならその下流だけが止まります（試していません）。その止め方でよければ recency が合います。次のどれかなら freshness です（筆者の判断）。
+
+- build の前に丸ごと止める
+- build の後に知らせる
+- warn と error の 2 段で分ける
 :::
 
-ただし、取り込み時刻の列で確かめる freshness が見るのは最新の 1 時刻だけで、一部の行の遅れや、まだ確定していない数字は分かりません。一部だけ届くデータには、判定を自分で書くよう公式は勧めています。
+ただし、取り込み時刻の列で確かめる freshness が見るのは最新の 1 時刻だけです。一部の行の遅れや、後から届く受注などで変わる数字は分かりません（5章の問い 7）。一部だけ届くデータには、判定を自分で書く道を公式は挙げています（試していません）。
 
 ### 確認問題 1
 
-0話の 08-06 06:00 の朝について答えてください。(1) テストを足せば気づけたか。(2) 06:30 のチェック SQL と freshness は何が違うか。(3) freshness を設定すれば、06:00 の build は止まったか。
+この章の 08-06 06:00 の朝について答えてください。(1) 重複・空・コード値のような、届いた行の中身を見るテストを足せば気づけたか。(2) 06:30 のチェック SQL と freshness は何が違うか。(3) freshness の設定（しきい値）を書けば、06:00 の build は止まったか。
 
 :::details 答え
-(1) 行の中身を見るテストを足すだけでは気づけません。欠けや古さには、そう書いたテストが要ります。(2) どちらも最新の取り込み時刻を見ます。チェック SQL は KPI の後に知らせ、freshness は build の前に呼べば KPI の前に判定して終了コードで返します。06:00 なら約 27.5 時間で、この会社の error 12 時間を超えます。(3) 止まりません。build の前に freshness を呼び、終了コードで止める手順が要ります。
+(1) 行の中身を見るテストを足すだけでは気づけません。欠けや古さには、そう書いたテストが要ります。(2) どちらも最新の取り込み時刻を見ます。チェック SQL は KPI の後に知らせ、freshness は build の前に呼べば KPI の前に判定して終了コードで返します。しきい値は、チェック SQL では SQL の中、freshness では source を定義する YAML に書きます。(3) 止まりません。build の前に freshness を呼び、終了コードで止める手順が要ります。
 :::
 
-**この章の要点**: build の前に呼んだ freshness は、最後に届いた時刻からの古さを KPI の前に判定し、行の中身を見るテストが見ない遅れを終了コードで返します。
+**この章の要点**: build の前に呼んだ freshness は、行の中身を見るテストが見ない遅れを KPI の前に判定し、error なら終了コード 1 を返します。
 
 ## 2. freshness の使いどころはどこか — 置き場所としきい値
 
 **この章の問い**: freshness を朝のジョブのどこに置き、しきい値をどう決めるのか。
 
 :::message
-**あなたの現場では**: 起動時刻をずらす代わりに、シェルの `$?` で後続を分けるのと同じ形で、ラッパーが freshness の終了コードで build を呼ぶかを決めます。
+**あなたの現場では**: シェルの `$?` で後続を分ける形は、dbt ではラッパーになります。起動時刻をずらす代わりに、ラッパーが freshness の終了コードで build を呼ぶかを決めます。
 :::
 
 ### どこに置くか
 
-freshness は、決まった間隔で届き、取り込み時刻の列がある取り込み層の表に付けるのがよいと筆者は考えます。更新の少ないマスタは `freshness: null` で外します。列がない表は、取り込みで列を足すか、外します。BigQuery では、しきい値だけを書いて列を指定しなければ、行の時刻ではなく表の最終更新時刻で判定されます（試していません）。
+freshness は、決まった間隔で届き、取り込み時刻の列がある取り込み層の表に付けるのがよいと筆者は考えます。更新の少ないマスタは `freshness: null` で外します（試していません）。列がない表は、取り込みで列を足すか、外します。BigQuery なら、列を指定せずに、表の最終更新時刻で判定させる道もあります（行の時刻ではありません。試していません）。
 
 | | error のとき | warn のとき | 止めるのは |
 |---|---|---|---|
-| data test | 下流を SKIP | 止めない | dbt build |
+| data test | 参照する表をすべて使う下流を SKIP | 止めない | dbt build |
 | source freshness | 終了コード 1 を返す | 終了コード 0 | 呼ぶ側 |
 
-build の前の確認は、止めたいソースだけを `--select` で絞って呼び、終了コードが 0 でなければ build を呼びません。止めないソースは混ぜると KPI まで止まるので、build の後か別のジョブで呼びます。結果の sources.json（表ごとの経過と状態が入るファイル）は通知に回します。公式も dbt platform のジョブについて、古いときに model を走らせたくないなら最初の手順に置く案を挙げています。そうでなければ、最後の手順か別のジョブを勧めています。
+build の前の確認は、止めたいソースだけを `--select` で絞って呼び、終了コードが 0 でなければ build を呼びません。止めないソースを混ぜると、それらが error を超えた朝に KPI まで止まるので、build の後か別のジョブで呼びます。結果の sources.json（表ごとの経過と状態が入るファイル）は通知に回します。
 
 ### しきい値の決め方
 
@@ -162,7 +182,7 @@ build の前の確認は、止めたいソースだけを `--select` で絞っ�
 | build の前の確認 | error だけ | ふつうの朝の古さと、届かなかった朝の古さの間 |
 | build の後の確認 | warn と error | error は到着の間隔＋許せる遅れ。warn は遅れ始めを知らせる位置 |
 
-たとえば、この会社の基幹（ふだん 02:30 ごろ着）を 06:00 に確かめます。前日の分がふつうに届いていれば、古さはその日の分が届いた朝で約 3.5 時間、届かない朝で 27 時間以上です。その間のどこに error を置いても判定は同じで、warn 6 時間は鳴りません。
+たとえば、この会社の基幹（ふだん 02:30 ごろ着）を 06:00 に確かめます。前日の到着（02:30 ごろ）がふつうなら、古さは、当日の分が届いた朝で約 3.5 時間、届かない朝で 27 時間以上です。その間のどこに error を置いても判定は同じで、warn 6 時間は鳴りません。
 
 :::details 補足: build の後の確認の頻度と例、表ごとの上書き
 公式は、鮮度の確認を最も短い SLA（いつまでに届くべきかの約束）の 2 倍以上の頻度で流すよう勧めます（SLA が 1 日なら 12 時間ごと）。この会社は目安より少なく、06:10 に 1 回だけです（build が 10 分で終わる前提）。
@@ -171,7 +191,7 @@ build の前の確認は、止めたいソースだけを `--select` で絞っ�
 
 目安どおり日中にも確かめると、毎日届く表は午後に warn 12 時間を超え、毎日鳴ります。その場合は warn を 24 時間より上に置き直します。
 
-表で上書きするなら、warn_after と error_after の両方を書きます。書かなかった方は source の値を引き継ぐためです。
+表で上書きするなら、warn_after と error_after の両方を書きます。書かなかった方は source の値を引き継ぐためです（試していません）。
 :::
 
 ### 書き方
@@ -197,6 +217,8 @@ sources:
 ### 起動役と dbt platform
 
 :::details 自前と dbt platform のジョブの違い
+公式は dbt platform（旧 dbt Cloud）のジョブについて、古いときに model を走らせたくないなら最初の手順に置く案を挙げています。そうでなければ、最後の手順か別のジョブを勧めています。
+
 | | 自前（ラッパー） | dbt platform のジョブ（2026-10-04 確認） |
 |---|---|---|
 | 止める | 終了コードで build を呼ばない | コマンドの手順として最初に置く（鮮度のチェックボックスでは止まらない） |
@@ -204,7 +226,7 @@ sources:
 
 :::
 
-起動役は増やさず、dbt build を呼んでいる起動役が代わりにラッパーを呼びます。スケジュールクエリだけで回しているなら、dbt を呼ぶ起動役を先に決めます。候補は、公式が案内する Apache Airflow や cron などの外の道具と、上の dbt platform のジョブです。組み方は 6話（予定）で扱います。
+スケジュールクエリだけで回しているなら、dbt を呼ぶ起動役を先に決めます。候補は、公式が案内する Apache Airflow や cron などの外の道具と、上の dbt platform（旧 dbt Cloud）のジョブです。組み方は 6話（予定）で扱います。起動役があれば増やさず、呼ぶ先を build からラッパーに替えます（図 0）。
 
 :::details 補足: JP1 などで到着を待ってから流してきた方へ
 ファイルの到着や先行ジョブの終了を待ってから後続を流していたなら、そこが違います。dbt は呼ばれた時刻に動き、freshness は呼ばれた時点の古さを返すだけです。待つ仕組みは、ジョブ管理の側に残ります。
@@ -231,20 +253,18 @@ sources:
 
 ### 故障ごとのテストの割り当て
 
-何を検査するかは、故障ごとに決めます。0話で触れたとおり、筆者も導入後にテスト不足でデータが一時的に食い違ったことがあります。この会社では 07-21 の基幹の改修で、受注の状態に「与信待ち」が加わりました。
+何を検査するかは、故障ごとに決めます。0話で触れたとおり、筆者も dbt の導入後に、テストが十分でなくデータが一時的に不整合になったことがあります。この会社では 07-21 の基幹の改修で、受注の状態に「与信待ち」が加わりました。
 
-| 故障（例は説明用の受注） | テスト（severity） | 置き場所 | 直し方 |
+| 故障 | テスト（severity） | 置き場所 | 直し方 |
 |---|---|---|---|
-| 新しいコード値（O9100000009 の与信待ち） | コード表への relationships（error） | staging | コード表に 1 行足す |
-| モールの再取り込み（O9100000104） | unique_combination_of_columns（warn） | source | staging で除く |
+| 新しいコード値（与信待ち） | コード表への relationships（error） | staging | コード表に 1 行足す |
+| モール受注の二重取り込み（09-08） | unique_combination_of_columns（warn） | source | staging で除く |
 | 基幹の遅れ | source freshness | build の前 | 届いた後に流し直す |
 | 受注番号の重複・空 | unique、not_null（error） | staging | 0話からある |
 
-seed（シード）は、リポジトリの CSV を表にする仕組みで、公式は変わることの少ない対応表のようなデータに向くとしています。relationships は、子の行に対応する行が親の表にあるかを確かめ、NULL は見ません。
+seed（シード）は、リポジトリの CSV を表にする仕組みで、公式は変わることの少ない対応表のようなデータに向くとしています。relationships は、子の行に対応する行が親の表にあるかを確かめ、NULL は見ません。コード表に与信待ちを足すとき、受注に数えるか（キャンセル扱いにするか）は経営企画部が決めます。
 
 unique_combination_of_columns は dbt_utils のテストで、2 行以上ある列の組を返します。where で対象を絞れます（書き方は 4-2）。
-
-新しい状態を受注に数えるかは、経営企画部が決めます。
 
 ### 確認問題 2
 
@@ -253,8 +273,8 @@ unique_combination_of_columns は dbt_utils のテストで、2 行以上ある�
 :::details 答え
 置き方によって効くしきい値が違うことを説明できれば正解です。
 
-- (1) 鳴りません。前日の分がふつうに届いていれば、06:00 の古さは約 3.5 時間か 27 時間以上で、効くのは error だけです。warn は日中に確かめたときに効きます（4-1 の図 3）。
-- (2) 要ります。届いていない朝の 06:10 でも広告は error 26 時間に届かず、warn がないと遅れが知らされません。HubSpot は error で分かりますが、warn は遅れ始めを知らせます。
+- (1) 鳴りません。前日の到着がふつうなら、06:00 の古さは約 3.5 時間か 27 時間以上で、効くのは error だけです。06:00 の 1 回の確認では、基幹の warn は働きません。
+- (2) 広告には要ります。届いていない朝の 06:10 でも広告は error 26 時間に届かず、warn がないと遅れが知らされません。06:10 の 1 回の確認で warn が働くのは広告で、HubSpot は error で分かります。
 - (3) HubSpot や広告が error を超えた朝は終了コードが 1 になり、届いた基幹の KPI まで前日のままになります。
 
 :::
@@ -271,30 +291,34 @@ unique_combination_of_columns は dbt_utils のテストで、2 行以上ある�
 
 ### 構成と準備
 
-ハンズオンはタグ ep1-end を使います。A は 0話の ep0-end から足したファイル、M は変えたファイルです。
+ハンズオンはタグ ep1-end を使います。
 
 https://github.com/e8dev-note/ec-analytics-handson/tree/ep1-end
 
+0話の ep0-end からの差は次のとおりで、A は足したファイル、M は変えたファイルです。
+
 ```text
-（前略: 変えていないファイルと、README.md・dbt_project.yml・models/marts/_marts.yml などの変更）
-M models/marts/agg_daily_channel_kpi.sql
-M models/staging/core/_core__models.yml
-M models/staging/core/_core__sources.yml
-（中略: 変えていないファイル）
-M models/staging/core/stg_core__orders.sql
-A models/staging/gads/_gads__sources.yml
-A models/staging/hubspot/_hubspot__sources.yml
-A models/staging/meta/_meta__sources.yml
-A package-lock.yml
-A packages.yml
-（中略: 変えていないファイル）
-A scripts/build_if_fresh.ps1
-A scripts/build_if_fresh.sh
-（中略: 変えていないファイル）
-A scripts/show_freshness.py
-A seeds/_seeds.yml
-A seeds/order_status_codes.csv
-（後略）
+M	.github/workflows/ci.yml
+M	README.md
+M	dbt_project.yml
+M	docs/dataform-vs-dbt.md
+M	expected/s__clean__2026-10-01.json
+M	expected/xs__clean__2026-10-01.json
+M	models/marts/_marts.yml
+M	models/marts/agg_daily_channel_kpi.sql
+M	models/staging/core/_core__models.yml
+M	models/staging/core/_core__sources.yml
+M	models/staging/core/stg_core__orders.sql
+A	models/staging/gads/_gads__sources.yml
+A	models/staging/hubspot/_hubspot__sources.yml
+A	models/staging/meta/_meta__sources.yml
+A	package-lock.yml
+A	packages.yml
+A	scripts/build_if_fresh.ps1
+A	scripts/build_if_fresh.sh
+A	scripts/show_freshness.py
+A	seeds/_seeds.yml
+A	seeds/order_status_codes.csv
 ```
 
 :::details 足したファイルの役割
@@ -307,9 +331,26 @@ A seeds/order_status_codes.csv
 
 :::
 
-0話で clone 済みなら、git clone の代わりにそのフォルダで `git fetch --tags` をします。その後は下の `git checkout ep1-end` から続けます。
+0話で clone 済みなら、git clone の代わりにそのフォルダで次を打ちます。
 
-PowerShell、Git Bash の順に載せます。違うのは環境変数とラッパーの行（4-1 (a)）です。
+```powershell
+git status --short
+```
+
+何か表示されたら、README の「0話で clone 済みの場合」の戻し方で戻します。次にタグを取ります。タグがまだない clone では、次のような表示が出ます。
+
+```powershell
+git fetch --tags
+```
+
+```text
+From https://github.com/e8dev-note/ec-analytics-handson
+ * [new tag]         ep1-end    -> ep1-end
+```
+
+続けて、下の `git checkout ep1-end` から進めます。
+
+PowerShell、Git Bash の順に載せます。Git Bash では、ラッパーの行を 4-1 (a) の形に、`"exit=$LASTEXITCODE"` を `echo "exit=$?"` に読み替えます。
 
 ```powershell
 git clone https://github.com/e8dev-note/ec-analytics-handson.git
@@ -335,8 +376,6 @@ export PYTHONUTF8=1 DO_NOT_TRACK=1 DBT_SEND_ANONYMOUS_USAGE_STATS=False
 uv run dbt deps
 ```
 
-dbt deps は、packages.yml の dbt のパッケージを入れるコマンドです。
-
 ```yaml:packages.yml
 # dbt パッケージ（版は完全に固定する。dbt deps で dbt_packages/ に入り、版は package-lock.yml にも記録される）。
 # dbt のパッケージは Python のパッケージ（uv.lock）とは別物で、uv sync では入らない。
@@ -353,11 +392,11 @@ uv run python -m generator --scale xs --preset ep1b
 ```
 
 :::details つまずき: dbt deps を忘れたとき、プロキシで通らないとき
-dbt deps を忘れると、dbt はプロジェクトを読み込む前に止まり、この環境では終了コードは 2 でした。
+dbt deps を忘れて dbt build を流すと、dbt はプロジェクトを読み込む前に止まり、この環境では終了コードは 2 でした。
 
 ```text
 （前略: 版の表示）
-08:16:00  [ERROR]: Encountered an error:
+13:55:06  [ERROR]: Encountered an error:
 Compilation Error
   dbt expects 1 package(s) based on packages specified in packages.yml, but found only 0 package(s) installed in dbt_packages. Following packages were not found: dbt_utils. Run "dbt deps" to install package dependencies.
 ```
@@ -376,9 +415,9 @@ uv run dbt build
 
 ```text
 （前略: 版の表示と 20 ノードの行）
-08:09:38  Completed successfully
-08:09:38  
-08:09:38  Done. PASS=20 WARN=0 ERROR=0 SKIP=0 NO-OP=0 REUSED=0 TOTAL=20
+16:25:16  Completed successfully
+16:25:16  
+16:25:16  Done. PASS=20 WARN=0 ERROR=0 SKIP=0 NO-OP=0 REUSED=0 TOTAL=20
 ```
 
 ```powershell
@@ -396,17 +435,18 @@ uv run dbt show --inline "select kpi_date, sum(order_count) as orders from {{ re
 テストは全部通りますが、KPI に 08-05 の行がありません。全ソースの freshness では、基幹の 2 表だけが ERROR STALE で、終了コードは 1 です。
 
 ```powershell
-uv run dbt source freshness
+uv run dbt source freshness; "exit=$LASTEXITCODE"
 ```
 
 ```text
 （前略: 版の表示。START の行はすべて省いた）
-08:09:45  1 of 6 ERROR STALE freshness of core.order_lines ............................... [ERROR STALE in 0.02s]
-08:09:45  2 of 6 ERROR STALE freshness of core.orders .................................... [ERROR STALE in 0.02s]
-08:09:45  3 of 6 PASS freshness of gads.campaign_daily ................................... [PASS in 0.02s]
-08:09:45  4 of 6 PASS freshness of hubspot.contacts ...................................... [PASS in 0.03s]
+16:25:24  1 of 6 ERROR STALE freshness of core.order_lines ............................... [ERROR STALE in 0.02s]
+16:25:24  2 of 6 ERROR STALE freshness of core.orders .................................... [ERROR STALE in 0.03s]
+16:25:24  3 of 6 PASS freshness of gads.campaign_daily ................................... [PASS in 0.03s]
+16:25:24  4 of 6 PASS freshness of hubspot.contacts ...................................... [PASS in 0.03s]
 （中略: HubSpot のメールイベントと Meta 広告も PASS。error の表の一覧）
-08:09:45  Done.
+16:25:24  Done.
+exit=1
 ```
 
 経過時間はコンソールに出ないので、結果の表示で見ます。
@@ -416,9 +456,9 @@ uv run python scripts/show_freshness.py
 ```
 
 ```text
-target/sources.json: 2026-10-04T08:09:45.646486Z (UTC) の結果。6 表のうち、遅れている表 2
-  ERROR  core.order_lines                 最新の取り込み 2026-10-03T04:41:32+00:00（27.5 時間前）  warn 6 時間 / error 12 時間
-  ERROR  core.orders                      最新の取り込み 2026-10-03T04:41:32+00:00（27.5 時間前）  warn 6 時間 / error 12 時間
+target/sources.json: 2026-10-04T16:25:24.385890Z (UTC) の結果。6 表のうち、遅れている表 2
+  ERROR  core.order_lines                 最新の取り込み 2026-10-03T12:57:10+00:00（27.5 時間前）  warn 6 時間 / error 12 時間
+  ERROR  core.orders                      最新の取り込み 2026-10-03T12:57:10+00:00（27.5 時間前）  warn 6 時間 / error 12 時間
 ```
 
 表示の時刻はずらした後のもので、27.5 時間が 08-06 06:00 の古さです。
@@ -445,7 +485,7 @@ sequenceDiagram
   opt 流し直す（起動役か人。事前に決める）
     starter->>wrapper: 07:00 ラッパーを呼び直す
     wrapper->>dbt: dbt source freshness（基幹だけ）
-    dbt-->>wrapper: PASS（約 20 分）、終了コード 0
+    dbt-->>wrapper: 古さ約 20 分で PASS、終了コード 0
     wrapper->>dbt: dbt build
     dbt->>dwh: seed・model・テストを流す
     Note right of dwh: 08-05 を含む KPI の表
@@ -502,8 +542,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build_if_fresh.ps1; 
 
 ```text
 （前略: 版の表示と START の行）
-08:10:05  1 of 2 ERROR STALE freshness of core.order_lines ............................... [ERROR STALE in 0.01s]
-08:10:05  2 of 2 ERROR STALE freshness of core.orders .................................... [ERROR STALE in 0.01s]
+16:25:44  1 of 2 ERROR STALE freshness of core.order_lines ............................... [ERROR STALE in 0.01s]
+16:25:44  2 of 2 ERROR STALE freshness of core.orders .................................... [ERROR STALE in 0.02s]
 （中略: error の表の一覧）
 [build_if_fresh] source:core is not fresh (exit 1). dbt build was not called.
 exit=1
@@ -584,13 +624,13 @@ uv run python scripts/show_freshness.py
 ```
 
 ```text
-target/sources.json: 2026-10-04T08:10:29.463726Z (UTC) の結果。2 表のうち、遅れている表 2
-  WARN   core.order_lines                 最新の取り込み 2026-10-04T00:42:24+00:00（7.5 時間前）  warn 6 時間 / error 12 時間
-  WARN   core.orders                      最新の取り込み 2026-10-04T00:42:24+00:00（7.5 時間前）  warn 6 時間 / error 12 時間
+target/sources.json: 2026-10-04T16:26:08.875380Z (UTC) の結果。2 表のうち、遅れている表 2
+  WARN   core.order_lines                 最新の取り込み 2026-10-04T08:58:03+00:00（7.5 時間前）  warn 6 時間 / error 12 時間
+  WARN   core.orders                      最新の取り込み 2026-10-04T08:58:03+00:00（7.5 時間前）  warn 6 時間 / error 12 時間
 ```
 :::
 
-**(d) build の後の確認**。HubSpot と広告の 4 表を `--replay` なしで載せ、取り込みが止まった状態の代わりにします。ラッパーは基幹だけを見るので、build が走ります。その後に 4 表を確かめると ERROR STALE で、終了コードは 1 です。
+**(d) build の後の確認**。HubSpot と広告の 4 表を `--replay` なしで載せ、取り込みが何日も止まった状態の代わりにします。ラッパーは基幹だけを見るので、build が走ります。その後に 4 表を確かめると、広告も ERROR STALE です。
 
 ```powershell
 uv run python scripts/load_duckdb.py --as-of 2026-08-06T07:00+09:00 --tables hubspot__contacts,hubspot__email_events,gads__campaign_daily,meta__campaign_insights_daily
@@ -604,28 +644,27 @@ uv run dbt source freshness --select source:hubspot source:gads source:meta
 
 ```text
 （前略: 版の表示と START の行）
-08:10:47  1 of 4 ERROR STALE freshness of gads.campaign_daily ............................ [ERROR STALE in 0.02s]
-08:10:47  2 of 4 ERROR STALE freshness of hubspot.contacts ............................... [ERROR STALE in 0.02s]
-08:10:47  3 of 4 ERROR STALE freshness of hubspot.email_events ........................... [ERROR STALE in 0.02s]
-08:10:47  4 of 4 ERROR STALE freshness of meta.campaign_insights_daily ................... [ERROR STALE in 0.03s]
+16:26:26  1 of 4 ERROR STALE freshness of gads.campaign_daily ............................ [ERROR STALE in 0.03s]
+16:26:26  2 of 4 ERROR STALE freshness of hubspot.contacts ............................... [ERROR STALE in 0.03s]
+16:26:26  3 of 4 ERROR STALE freshness of hubspot.email_events ........................... [ERROR STALE in 0.03s]
+16:26:26  4 of 4 ERROR STALE freshness of meta.campaign_insights_daily ................... [ERROR STALE in 0.03s]
 （後略: error の表の一覧）
 ```
 
-KPI は作られた後なので止まりません。遅れは sources.json に残るので、本番ではこれを通知に回します。
+KPI は作られた後なので止まりません。
 
 :::details 補足: 試すときの注意と、ほかの呼び方
 
 - ロードから時間を置くと、その分だけ古く判定されます。
-- 全ソースを build の前に確かめると、HubSpot や広告が error を超えた朝も終了コードが 1 になり、KPI まで止まります。
-- この記事の確認に使った PC では、.ps1 は `-ExecutionPolicy Bypass` なしで読み込めませんでした。この指定を使えないときは、(a) の Git Bash 版で同じ確認ができます。
+- 確認に使った PC では、.ps1 は `-ExecutionPolicy Bypass` なしで読み込めませんでした。この指定を使えないときは、(a) の Git Bash 版で確かめます。
 - 終了コードでは WARN と正常を区別できず、1 は権限の不足などでも返ります。WARN で止めたいなら、sources.json の状態を読みます（試していません）。
 - sources.json は実行ごとに上書きされ、推移は残りません。
-- 前回より新しいデータが届いた source の下流だけを選ぶ `source_status:fresher+` もあります（6話で扱う予定）。
+- 前回の結果（`--state`）と比べ、新しいデータが届いた source の下流を選ぶ `source_status:fresher+` もあります（試していません。6話で扱う予定）。
 :::
 
 ### 4-2. コード表の欠けと severity
 
-4-2 と 4-3 は 10-01 の状態で行います。as-of を付けずに載せ直してから build します。
+4-2 と 4-3 は 10-01 の状態で行います。時刻の指定（`--as-of`）を付けずに載せ直してから build します。
 
 ```powershell
 uv run python scripts/load_duckdb.py
@@ -643,7 +682,7 @@ uv run dbt show --inline "select count(*) as kpi_rows, sum(order_count) as order
 |      894 |  17829 | 99975718 |
 ```
 
-build は PASS=18 WARN=2 で、WARN は止まりません。1 つは 0話から warn の、明細から受注への relationships（22 件）です。もう 1 つは source の重複（10 組）で、下がその定義です。
+build は PASS=18 WARN=2 で、WARN は止まりません。1 つは明細から受注への relationships（22 件）で、0話から warn にしてあります。もう 1 つは source の重複（10 組）で、下がその定義です。
 
 ```yaml:models/staging/core/_core__sources.yml（13〜23 行目）
       - name: orders
@@ -659,7 +698,7 @@ build は PASS=18 WARN=2 で、WARN は止まりません。1 つは 0話から 
                 severity: warn
 ```
 
-コード表から ON_HOLD_CREDIT（与信待ち）の行を消し、改修の前のコード表にして build します。
+コード表から ON_HOLD_CREDIT（与信待ち）の行をエディタで消して改修の前の形にし、git diff で確かめてから build します。
 
 ```powershell
 git diff seeds/order_status_codes.csv
@@ -699,7 +738,7 @@ flowchart TB
   order_status_codes[("order_status_codes<br/>seed のコード表<br/>与信待ちの行なしで載った")]:::data
   dup_test[["重複の知らせ<br/>warn → WARN<br/>止めない"]]:::proc
   stg_core__orders["stg_core__orders<br/>作り直し済み"]:::proc
-  rel_test[["コード表への参照<br/>error → FAIL<br/>例 O9100000009"]]:::alert
+  rel_test[["コード表への参照<br/>error → FAIL<br/>与信待ちの受注で落ちる"]]:::alert
   agg_daily_channel_kpi["agg_daily_channel_kpi<br/>SKIP<br/>前回の表のまま"]:::skip
   core_orders -.-> dup_test
   core_orders -->|"source()"| stg_core__orders
@@ -714,26 +753,27 @@ flowchart TB
   classDef skip fill:#F7F6F2,stroke:#8A8F98,stroke-width:2px,stroke-dasharray:6 4,color:#8A8F98
   classDef note fill:none,stroke:none,color:#8A8F98
 ```
-図 4: コード表と stg_core__orders は作り直され、止まる（SKIP）のは両方を参照する KPI だけです。warn のテストは止めません（例の番号は説明用）。
+図 4: コード表と stg_core__orders は作り直され、止まる（SKIP）のは両方を参照する KPI だけです。warn のテストは止めません。
 
 ```powershell
-uv run dbt build
+uv run dbt build; "exit=$LASTEXITCODE"
 ```
 
 ```text
-（前略: 版の表示）
-08:11:05  3 of 20 WARN 10 dbt_utils_source_unique_combination_of_columns_core_orders_channel_code__mall_order_no  [WARN 10 in 0.08s]
+（前略: 版の表示と START の行）
+16:26:45  3 of 20 WARN 10 dbt_utils_source_unique_combination_of_columns_core_orders_channel_code__mall_order_no  [WARN 10 in 0.09s]
 （中略）
-08:11:05  2 of 20 OK loaded seed file ec.order_status_codes .............................. [INSERT 6 in 0.10s]
+16:26:45  2 of 20 OK loaded seed file ec.order_status_codes .............................. [INSERT 6 in 0.09s]
 （中略）
-08:11:05  4 of 20 OK created sql view model ec_staging.stg_core__orders .................. [OK in 0.05s]
+16:26:45  4 of 20 OK created sql view model ec_staging.stg_core__orders .................. [OK in 0.06s]
 （中略: PASS のテスト）
-08:11:06  18 of 20 FAIL 13 relationships_stg_core__orders_order_status__status_code__ref_order_status_codes_  [FAIL 13 in 0.05s]
-08:11:06  17 of 20 WARN 22 relationships_stg_core__order_lines_order_no__order_no__ref_stg_core__orders_  [WARN 22 in 0.07s]
+16:26:45  17 of 20 WARN 22 relationships_stg_core__order_lines_order_no__order_no__ref_stg_core__orders_  [WARN 22 in 0.06s]
+16:26:45  18 of 20 FAIL 13 relationships_stg_core__orders_order_status__status_code__ref_order_status_codes_  [FAIL 13 in 0.06s]
 （中略）
-08:11:06  20 of 20 SKIP relation ec_marts.agg_daily_channel_kpi .......................... [SKIP]
+16:26:45  20 of 20 SKIP relation ec_marts.agg_daily_channel_kpi .......................... [SKIP]
 （中略: error と warning の詳細）
-08:11:06  Done. PASS=16 WARN=2 ERROR=1 SKIP=1 NO-OP=0 REUSED=0 TOTAL=20
+16:26:46  Done. PASS=16 WARN=2 ERROR=1 SKIP=1 NO-OP=0 REUSED=0 TOTAL=20
+exit=1
 ```
 
 コード表への relationships が FAIL（13 件）になり、終了コードは 1 です。KPI は SKIP で前回の表のまま残り、件数と金額も壊す前と同じです。
@@ -757,18 +797,18 @@ uv run dbt build
 ```
 
 :::details warn にしていたら
-relationships を warn にして壊すと、build は終了コード 0 で KPI を作り直します。コード表にない状態の受注 13 件（記録から数えると 55,507 円）は、黙って抜けます。試し方は README の「1話のもう一歩」にあります。
+relationships を warn にして壊すと、build は終了コード 0 で KPI を作り直します。コード表にない状態の受注 13 件（記録から数えると 55,507 円）は、黙って抜けます。下の出力は、README の「1話のもう一歩」の手順を別に試した記録です。
 
 ```text
 （前略）
-08:18:11  18 of 20 WARN 13 relationships_stg_core__orders_order_status__status_code__ref_order_status_codes_  [WARN 13 in 0.05s]
+13:58:13  18 of 20 WARN 13 relationships_stg_core__orders_order_status__status_code__ref_order_status_codes_  [WARN 13 in 0.06s]
 （中略）
-08:18:11  20 of 20 OK created sql table model ec_marts.agg_daily_channel_kpi ............. [OK in 0.07s]
+13:58:13  20 of 20 OK created sql table model ec_marts.agg_daily_channel_kpi ............. [OK in 0.10s]
 （中略）
-08:18:11  Done. PASS=17 WARN=3 ERROR=0 SKIP=0 NO-OP=0 REUSED=0 TOTAL=20
+13:58:13  Done. PASS=17 WARN=3 ERROR=0 SKIP=0 NO-OP=0 REUSED=0 TOTAL=20
 ```
 
-KPI がコード表を inner join し、キャンセルの印で除いているからです。seed への relationships で止まるのは、seed も参照する下流だけです。
+KPI がコード表を inner join し、キャンセルの印で除いているからです。
 
 ```sql:models/marts/agg_daily_channel_kpi.sql（抜粋）
 （前略: status_codes の CTE）
@@ -803,7 +843,7 @@ uv run dbt show --inline "select 'source' as layer, count(*) as orders, count(*)
 | staging |  18580 |            13776 |
 ```
 
-重複の 10 件だけが除かれます。残す 1 件が実行ごとに変わらないよう、並びを created_at と order_no で一意にしています。
+重複の 10 件だけが除かれます。ハンズオンの記録から数えると、4-2 の WARN 22 件は、この 10 件の明細で、KPI には入りません。残す 1 件が実行ごとに変わらないよう、並びを created_at と order_no で一意にしています。
 
 ```sql:models/staging/core/stg_core__orders.sql（11〜21 行目）
 numbered as (
@@ -831,13 +871,13 @@ where import_seq = 1
 **この章の問い**: 本番に入れる前の打ち合わせで何を聞かれ、どう答えるか。
 
 **問い 1（上司）: dbt にしたら次は気づけるのか。テストを足せばよいのか**
-行の中身を見るテストを足しても、届いていない朝には気づけません（古さを見るテストは 1章の補足）。止めたいソースの鮮度を build の前に確かめれば、欠けた KPI を作らずに済みます。止めるのは呼ぶ側です。
+行の中身を見るテストを足しても、届いていない朝には気づけません（古さを見るテストは 1章の補足）。止めたいソースの鮮度を build の前に確かめれば、欠けた KPI を作らずに済みます。
 
 **問い 2（上司）: 今の最終取り込み時刻のチェックを、KPI の前に移すだけではだめか**
-移せば止められ、変換を dbt に移さないならそれで足ります（筆者の判断）。dbt に移すなら、クエリを書かずにしきい値を source の隣に宣言でき、止めるソースと知らせるソースを分けて呼べます（1章）。
+移せば止められ、変換を dbt に移さないならそれで足ります（筆者の判断）。dbt に移したときの得は 1章で比べました。
 
-**問い 3（運用担当）: 約 300 本のチェック SQL と毎朝 40 通のメールは減るのか**
-減るのは最終取り込み時刻と、コード値・重複の数本だけで、しばらく並べてから止めます。鳴りすぎの整理は 3話です。
+**問い 3（運用担当）: 約 300 本のチェック SQL と毎朝約 40 通のメールは減るのか**
+減るのは最終取り込み時刻と、コード値・重複の数本だけで、しばらく並行して動かしてから、古いチェック SQL をやめます。鳴りすぎの整理は 3話です。
 
 **問い 4（朝会の運営）: 基幹が遅れて止めた朝、09:00 の朝会には何が出るのか**
 前日の KPI のままです（4-1 (a)）。取り違えないよう、画面に KPI の基準日か未着の注記を出します。誰が流し直すかと、09:00 までに届かないときの進め方は事前に決めます。6話（予定）で扱います。
@@ -846,7 +886,7 @@ where import_seq = 1
 build は止まらないので、そのソースを使う数字は欠けたまま出ます。誰に何で知らせ、朝会でどう扱うかを決めておきます。
 
 **問い 6（上司、経理）: 鮮度の確認に費用はかかるのか**
-取り込み時刻の列で確かめるなら、鮮度の確認も DWH で流れる SELECT です。BigQuery のオンデマンド課金なら、処理したバイトで課金されます（2026-10-04 確認）。INFORMATION_SCHEMA.JOBS で 1 回分の処理量を見て、多ければ filter で絞ります。減る量は表の作りによります。
+取り込み時刻の列で確かめるなら、鮮度の確認も DWH で流れる SELECT です。BigQuery のオンデマンド課金なら、処理したバイトで課金され、クエリが参照する表ごとに最低 10 MB です（2026-10-04 確認）。INFORMATION_SCHEMA.JOBS で 1 回分の処理量を見て、多ければ filter（確認のクエリに WHERE を付ける設定）で絞ります。減る量は表の作りによります。この記事の手順は、dbt platform なしの自前の dbt（dbt-core）で動かしました（製品ごとの費用は 0話の 2章）。
 
 **問い 7（アナリスト）: freshness が全部緑なら、朝会の数字は確定しているのか**
 確定とは限りません（1章）。ハンズオンでも、08-06 07:00 に PASS だったときの 08-05 は 172 件で、後から届いた受注などで 10-01 には 195 件でした。
@@ -858,14 +898,14 @@ freshness がすべて緑の朝です。自社 EC は Shopify です。前日の
 :::details 答え
 どれも確定とは限りません。
 
-- (1) 取り消しは後から届きます。与信待ちをコード表に足した後の説明用の受注では、08-05 は 08-06 07:00 に 6 件、10-01 に 4 件です。
+- (1) 取り消しは後から届きます。図 1 の 08-05 の 7 件は、1 件が抽出の前に取り消し済みです。コード表に与信待ちを足した後なら、08-06 07:00 に 6 件、10-01 に 4 件と数えます。
 - (2) Shopify の Admin API（2026-10 版）では、ジャーニーは、帰属のセッションが作られるまで ready が false です。
-- (3) この会社では、開封は送信から 2〜3 日かけて積み上がります。社外の例では、HubSpot のコネクタを提供する Fivetran が、メールイベントの表を 25 時間さかのぼって取り直すと説明しています。処理の遅れで取りこぼした可能性のあるイベントを拾うためとしています（2026-10-04 確認）。
+- (3) この会社では、開封は送信から 2〜3 日かけて積み上がります。
 
 確定したかは、別の列か集計の条件で示します（作り方は 3話・4話）。
 :::
 
-**この章の要点**: 「次は気づけるのか」には、行の中身を見るテストでは気づけず、鮮度を build の前に確かめれば欠けた KPI を作らずに済む、と答えます。
+**この章の要点**: 「次は気づけるのか」には、鮮度を build の前に確かめれば欠けた KPI を作らずに済む、と答えます。
 
 ## 6. まとめと次の一歩
 
@@ -877,7 +917,7 @@ freshness がすべて緑の朝です。自社 EC は Shopify です。前日の
 
 **(a) 自社で確かめること**
 
-1. 取り込み層の表ごとに、取り込み時刻の列があるかと、タイムゾーン付きか
+1. 取り込み層の表ごとに、取り込み時刻の列があるかと、タイムゾーン付きか（ない値は UTC とみなされ、日本時間だと約 9 時間甘く判定されます）
 2. 表ごとの、ふつうの日といちばん遅かった日の到着の時刻
 3. 朝のチェック SQL を「最終取り込み時刻」「件数・重複・コード値」「その他」に分けた本数
 
@@ -887,6 +927,7 @@ freshness がすべて緑の朝です。自社 EC は Shopify です。前日の
 - 止めた朝に、誰がいつ流し直すか → 運用担当と EC 事業本部
 - HubSpot と広告の遅れを、誰に何で知らせるか → マーケティング本部
 - dbt deps の通信先への接続を許可してもらえるか → 情報システム部
+- 基幹のコード値を変える改修を、事前に知らせてもらえるか → 基幹の保守の委託先（SIer）
 
 **(c) 自社で埋める表**
 
@@ -919,21 +960,24 @@ dbt の次の版の v2（0話の 6章）では、source と model をまとめ�
 | dbt_utils | dbt deps で入れるテストなどのパッケージ |
 | ERROR STALE | 鮮度の確認で error のしきい値を超えたときの表示 |
 | filter | 鮮度の確認のクエリに WHERE を付け、読む範囲を絞る設定 |
-| source_status:fresher+ | 新しいデータが届いた source の下流を選ぶ指定（6話） |
+| source_status:fresher+ | 新しいデータが届いた source の下流を選ぶ指定（6話で扱う予定） |
 
-### 参考文献（確認日 2026-10-04）
+### 参考文献
 
+確認日は 2026-10-04 です（Stored procedures・Schedule workloads・About dbt setup・What is dbt?・About dbt models・Materializations は 2026-10-05）。
+
+- dbt docs: [What is dbt?](https://docs.getdbt.com/docs/introduction)、[About dbt models](https://docs.getdbt.com/docs/build/models)、[Materializations](https://docs.getdbt.com/docs/build/materializations)
 - dbt docs: [Add sources to your DAG](https://docs.getdbt.com/docs/build/sources)、[freshness](https://docs.getdbt.com/reference/resource-configs/freshness)、[Source freshness](https://docs.getdbt.com/docs/deploy/source-freshness)、[About dbt source command](https://docs.getdbt.com/reference/commands/source)、[Sources JSON file](https://docs.getdbt.com/reference/artifacts/sources-json)、[Exit codes](https://docs.getdbt.com/reference/exit-codes)
 - dbt docs: [About dbt build command](https://docs.getdbt.com/reference/commands/build)、[severity, error_if, and warn_if](https://docs.getdbt.com/reference/resource-configs/severity)、[Add data tests to your DAG](https://docs.getdbt.com/docs/build/data-tests)、[About data tests property](https://docs.getdbt.com/reference/resource-properties/data-tests)、[where](https://docs.getdbt.com/reference/resource-configs/where)
-- dbt docs: [Add Seeds to your DAG](https://docs.getdbt.com/docs/build/seeds)、[column_types](https://docs.getdbt.com/reference/resource-configs/column_types)、[Packages](https://docs.getdbt.com/docs/build/packages)、[About dbt deps command](https://docs.getdbt.com/reference/commands/deps)、[Node selector methods](https://docs.getdbt.com/reference/node-selection/methods)、[About dbt freshness command](https://docs.getdbt.com/reference/commands/freshness)、[Integrate with other orchestration tools](https://docs.getdbt.com/docs/deploy/deployment-tools)
+- dbt docs: [Add Seeds to your DAG](https://docs.getdbt.com/docs/build/seeds)、[column_types](https://docs.getdbt.com/reference/resource-configs/column_types)、[Packages](https://docs.getdbt.com/docs/build/packages)、[About dbt deps command](https://docs.getdbt.com/reference/commands/deps)、[Node selector methods](https://docs.getdbt.com/reference/node-selection/methods)、[About dbt freshness command](https://docs.getdbt.com/reference/commands/freshness)、[Integrate with other orchestration tools](https://docs.getdbt.com/docs/deploy/deployment-tools)、[About dbt setup](https://docs.getdbt.com/docs/about-setup)
 - dbt_utils: [dbt Hub](https://hub.getdbt.com/dbt-labs/dbt_utils/latest/)、[README（1.4.1）](https://raw.githubusercontent.com/dbt-labs/dbt-utils/1.4.1/README.md)
-- Google Cloud: [BigQuery pricing](https://cloud.google.com/bigquery/pricing)、[JOBS view](https://docs.cloud.google.com/bigquery/docs/information-schema-jobs)、[Scheduling queries](https://docs.cloud.google.com/bigquery/docs/scheduling-queries)、[Numbering functions](https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/numbering_functions)
+- Google Cloud: [BigQuery pricing](https://cloud.google.com/bigquery/pricing)、[JOBS view](https://docs.cloud.google.com/bigquery/docs/information-schema-jobs)、[Scheduling queries](https://docs.cloud.google.com/bigquery/docs/scheduling-queries)、[Stored procedures](https://docs.cloud.google.com/bigquery/docs/procedures)、[Schedule workloads](https://docs.cloud.google.com/bigquery/docs/orchestrate-workloads)、[Numbering functions](https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/numbering_functions)、[REST Resource: tables](https://docs.cloud.google.com/bigquery/docs/reference/rest/v2/tables)
 - Git: [git-fetch（2.55.0）](https://git-scm.com/docs/git-fetch/2.55.0)
-- その他: [DuckDB: Non-Deterministic Behavior](https://duckdb.org/docs/current/operations_manual/non-deterministic_behavior)、[Shopify: CustomerJourneySummary](https://shopify.dev/docs/api/admin-graphql/latest/objects/CustomerJourneySummary)、[Fivetran: HubSpot connector](https://fivetran.com/docs/connectors/applications/hubspot)
+- その他: [DuckDB: Non-Deterministic Behavior](https://duckdb.org/docs/current/operations_manual/non-deterministic_behavior)、[Shopify: CustomerJourneySummary](https://shopify.dev/docs/api/admin-graphql/latest/objects/CustomerJourneySummary)
 
 ### 更新履歴
 
-- 公開日: 公開
+- 2026-10-05: 公開
 
 ### 生成 AI の利用と商標
 
