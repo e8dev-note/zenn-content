@@ -82,7 +82,7 @@ flowchart TB
 - 概要だけなら、0・1・2・6章を読みます。
 - 運用を設計するなら、加えて 3・5章を読みます。
 - 手を動かすなら、さらに 4章を読みます。
-- 見込みは、読むのに約 29 分、手を動かすのに 45 分です。解説動画は 6章に置きます（準備中）。
+- 見込みは、読むのに約 29 分、手を動かすのに 45 分です。解説動画は 6章にあります。
 
 **動作確認環境（2026-10-04〜05）**: Windows 11（PowerShell 5.1、Git Bash）、Python 3.12、uv 0.12.18。dbt-core 1.12.5、dbt-duckdb 1.11.0、dbt のパッケージ dbt_utils 1.4.1。DB は BigQuery の代わりに、PC の中で動く DuckDB 1.5.6 です。
 
@@ -939,7 +939,9 @@ freshness がすべて緑の朝です。自社 EC は Shopify です。前日の
 
 **(d) 1 枚図**: 0章の図 0 です。
 
-解説動画は準備中です。
+解説動画です（ナレーションは筆者の声をもとにした AI 合成音声）。
+
+https://www.youtube.com/watch?v=8USSouIrMy8
 
 ### 次の一歩
 
@@ -981,6 +983,6 @@ dbt の次の版の v2（0話の 6章）では、source と model をまとめ�
 
 ### 生成 AI の利用と商標
 
-本記事の構成・下書き・図、ハンズオンの作成、一次情報との照合、通読、手順の再現の点検に生成 AI を利用しています。コードと出力は、検証環境で実行したものだけを載せています。図は出典を明記すれば社内資料などに利用できます（[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/deed.ja)。製品名などの商標は対象外です）。
+本記事の構成・下書き・図、ハンズオンの作成、一次情報との照合、通読、手順の再現の点検、解説動画の作成と試聴・試写の点検に生成 AI を利用しています。コードと出力は、検証環境で実行したものだけを載せています。解説動画のナレーションは、筆者の声をもとにした AI 合成音声（Gemini TTS）です。図は出典を明記すれば社内資料などに利用できます（[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/deed.ja)。製品名などの商標は対象外です）。
 
-dbt、dbt Core、dbt Cloud は dbt Labs, LLC の商標です。BigQuery と Google Cloud は Google LLC の商標です。DuckDB は DuckDB Foundation の商標です。その他の会社名と製品名は各社の商標または登録商標です。本記事は各社とは関係がなく、各社の承認や後援を受けたものではありません。
+dbt、dbt Core、dbt Cloud は dbt Labs, LLC の商標です。BigQuery、Google Cloud、Gemini は Google LLC の商標です。DuckDB は DuckDB Foundation の商標です。その他の会社名と製品名は各社の商標または登録商標です。本記事は各社とは関係がなく、各社の承認や後援を受けたものではありません。
